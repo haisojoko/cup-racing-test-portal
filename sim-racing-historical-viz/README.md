@@ -28,8 +28,3 @@ It also tolerates:
 - placeholder cells like `TBD` or `Maybe` in drill-down tables
 - one-off text annotations in team standings such as upgrade notes
 - drivers present in CPI/weighted-score sections but missing from career totals
-
-## Notes For Cup Racing Data
-
-- `S21` is treated as upcoming and excluded from completed-history leaderboards.
-- `S14` is treated as a valid multi-class season.
