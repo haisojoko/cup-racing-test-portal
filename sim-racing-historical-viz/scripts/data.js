@@ -1298,6 +1298,23 @@ function applyBayesianShrinkage(aggregates) {
   return aggregates;
 }
 
+function matchesInsightsScope(record, insightsFilters = {}) {
+  if (!record || record.isUpcoming) {
+    return false;
+  }
+  if (insightsFilters.era && insightsFilters.era !== "all" && record.eraLabel !== insightsFilters.era) {
+    return false;
+  }
+  if (
+    insightsFilters.division &&
+    insightsFilters.division !== "all" &&
+    record.type !== insightsFilters.division
+  ) {
+    return false;
+  }
+  return true;
+}
+
 // Return a single driver's top N tracks by adjusted score.
 function getDriverTrackProfile(dataset, driver, trackAggregateCache, limit) {
   const allAggregates = trackAggregateCache || buildTrackAggregates(dataset);
@@ -1359,20 +1376,7 @@ function buildSeasonRanking(dataset) {
 // Insights use a separate, local filter set so the broader stats tab can explore the archive independently.
 function getInsightsSeasonRecords(dataset, insightsFilters = {}) {
   const filtered = dataset.weightedRecords
-    .filter((record) => !record.isUpcoming)
-    .filter((record) => {
-      if (insightsFilters.era && insightsFilters.era !== "all" && record.eraLabel !== insightsFilters.era) {
-        return false;
-      }
-      if (
-        insightsFilters.division &&
-        insightsFilters.division !== "all" &&
-        record.type !== insightsFilters.division
-      ) {
-        return false;
-      }
-      return true;
-    });
+    .filter((record) => matchesInsightsScope(record, insightsFilters));
 
   const seasonMetricsByKey = {};
   Object.values(groupBy(filtered, "driver")).forEach((driverRecords) => {
@@ -1394,6 +1398,17 @@ function getInsightsSeasonRecords(dataset, insightsFilters = {}) {
         paceScore,
         resultsScore,
         paceGap: Number((paceScore - resultsScore).toFixed(1)),
+        clutchScore: Number((resultsScore - paceScore).toFixed(1)),
+        qualifyingScore: Number(
+          ((((record.poleRate || 0) * 0.7) + ((record.fastestLapRate || 0) * 0.3))).toFixed(1),
+        ),
+        ironmanScore: Number(
+          (
+            ((record.participationRate || 0) * 0.65) +
+            ((record.top5Rate || 0) * 0.2) +
+            ((record.pointsRate || 0) * 0.15)
+          ).toFixed(1),
+        ),
         previousSeasonId: previous ? previous.seasonId : "",
         weightedScoreDeltaPrev:
           previous && previous.weightedScore != null && record.weightedScore != null
@@ -1409,16 +1424,92 @@ function getInsightsSeasonRecords(dataset, insightsFilters = {}) {
       paceScore: 0,
       resultsScore: 0,
       paceGap: 0,
+      clutchScore: 0,
+      qualifyingScore: 0,
+      ironmanScore: 0,
       previousSeasonId: "",
       weightedScoreDeltaPrev: null,
     }),
   }));
 }
 
+function buildInsightsTrackRows(dataset, insightsFilters = {}) {
+  const accumulator = {};
+
+  (dataset.seasonDetails || [])
+    .filter((seasonDetail) => matchesInsightsScope(seasonDetail, insightsFilters))
+    .forEach((seasonDetail) => {
+      (seasonDetail.venues || []).forEach((venue) => {
+        const trackName = normalizeInlineText(venue.venueName || "");
+        if (!trackName) return;
+
+        (venue.rows || []).forEach((row) => {
+          const driver = normalizeInlineText(row.driver || "");
+          if (!driver) return;
+
+          const key = driver + "|||" + trackName;
+          if (!accumulator[key]) {
+            accumulator[key] = {
+              driver,
+              track: trackName,
+              starts: 0,
+              wins: 0,
+              podiums: 0,
+              top5s: 0,
+              totalPoints: 0,
+              seasonIds: [],
+            };
+          }
+
+          const entry = accumulator[key];
+          if (!entry.seasonIds.includes(seasonDetail.seasonId)) {
+            entry.seasonIds.push(seasonDetail.seasonId);
+          }
+
+          (row.races || []).forEach((race) => {
+            const pos = parseNumberish(race.position);
+            if (pos == null) return;
+
+            entry.starts += 1;
+            if (pos === 1) entry.wins += 1;
+            if (pos <= 3) entry.podiums += 1;
+            if (pos <= 5) entry.top5s += 1;
+            entry.totalPoints += race.points || 0;
+          });
+        });
+      });
+    });
+
+  const aggregates = Object.values(accumulator).filter((entry) => entry.starts > 0);
+
+  aggregates.forEach((entry) => {
+    entry.rawWinRate = (entry.wins / entry.starts) * 100;
+    entry.rawPodiumRate = (entry.podiums / entry.starts) * 100;
+    entry.rawTop5Rate = (entry.top5s / entry.starts) * 100;
+    entry.pointsPerStart = deriveAverage(entry.totalPoints, entry.starts);
+    entry.seasonsCount = entry.seasonIds.length;
+  });
+
+  return applyBayesianShrinkage(aggregates).sort(
+    (left, right) => (right.trackScore || 0) - (left.trackScore || 0),
+  );
+}
+
 // Career rollups for the insights tab are rebuilt from the locally filtered season slice so era/division lenses stay honest.
 function buildInsightsCareerRollups(dataset, insightsFilters = {}) {
   const seasonRecords = getInsightsSeasonRecords(dataset, insightsFilters);
+  const trackRows = buildInsightsTrackRows(dataset, insightsFilters);
   const careerLookup = createLookup(dataset.careerRecords, "driver");
+  const trackRowsByDriver = groupBy(trackRows, "driver");
+  const bestTrackByDriver = Object.entries(trackRowsByDriver).reduce(
+    (accumulator, [driver, rows]) => {
+      accumulator[driver] = [...rows].sort(
+        (left, right) => (right.trackScore || 0) - (left.trackScore || 0),
+      )[0] || null;
+      return accumulator;
+    },
+    {},
+  );
 
   return Object.entries(groupBy(seasonRecords, "driver"))
     .map(([driver, records]) => {
@@ -1442,6 +1533,7 @@ function buildInsightsCareerRollups(dataset, insightsFilters = {}) {
         ((((averageOf(ordered, "top5Rate") || 0) * 0.6) + ((averageOf(ordered, "participationRate") || 0) * 0.4))).toFixed(1),
       );
       const decoratedScore = Number(((totalWdc * 1) + (totalWcc * 0.45) + totalWins * 0.02).toFixed(3));
+      const signatureTrack = bestTrackByDriver[driver] || null;
 
       return {
         driver,
@@ -1469,6 +1561,17 @@ function buildInsightsCareerRollups(dataset, insightsFilters = {}) {
         efficiencyScore,
         consistencyScore,
         decoratedScore,
+        signatureTrack,
+        signatureTrackScore: signatureTrack ? signatureTrack.trackScore : null,
+        signatureTrackStarts: signatureTrack ? signatureTrack.starts : null,
+        signatureTrackWins: signatureTrack ? signatureTrack.wins : null,
+        signatureTrackPodiums: signatureTrack ? signatureTrack.podiums : null,
+        signatureTrackTop5s: signatureTrack ? signatureTrack.top5s : null,
+        signatureTrackAdjWinRate: signatureTrack ? signatureTrack.adjWinRate : null,
+        signatureTrackAdjPodiumRate: signatureTrack ? signatureTrack.adjPodiumRate : null,
+        signatureTrackAdjTop5Rate: signatureTrack ? signatureTrack.adjTop5Rate : null,
+        signatureTrackPointsPerStart: signatureTrack ? signatureTrack.pointsPerStart : null,
+        trackPortfolioCount: (trackRowsByDriver[driver] || []).length,
         peakSeason,
         latestSeason: ordered[ordered.length - 1] || null,
       };
