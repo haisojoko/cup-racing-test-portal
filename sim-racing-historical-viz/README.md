@@ -6,10 +6,10 @@ Standalone no-build web app for historical sim racing analysis.
 
 Open [index.html](c:\Users\josiah.koo\sim-racing-historical-viz\index.html) directly in a browser, then:
 
-1. Upload a Markdown archive.
-2. Review validation warnings in the overview panel.
-3. Filter by season, era, division, team, or car.
-4. Select drivers to compare and export a summary or chart.
+1. Upload a Markdown archive (default cup racing .md is located in the project `data` folder).
+3. Review validation warnings in the overview panel.
+4. Filter by season, era, division, team, or car.
+5. Select drivers to compare and export a summary or chart.
 
 ## Current Import Expectations
 
