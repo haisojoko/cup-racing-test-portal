@@ -33,4 +33,3 @@ It also tolerates:
 
 - `S21` is treated as upcoming and excluded from completed-history leaderboards.
 - `S14` is treated as a valid multi-class season.
-- `Hana` can be shown from CPI/weighted-score data even if the career totals table is not updated yet.
