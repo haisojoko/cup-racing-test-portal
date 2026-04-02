@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Slipstream Archive Lab</title>
+    <meta
+      name="description"
+      content="Historical sim racing analysis workspace for Markdown season archives."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Show a static fallback when JavaScript is disabled, since the app is fully client-rendered. -->
+    <noscript>
+      <div class="noscript-banner">
+        Slipstream Archive Lab needs JavaScript enabled to parse uploads and render
+        the analysis workspace.
+      </div>
+    </noscript>
+
+    <div class="app-shell">
+      <!-- Hero / top-level actions for demo loading and export utilities. -->
+      <header class="hero panel">
+        <div class="hero__copy">
+          <p class="hero__eyebrow">Historical Sim Racing Intelligence</p>
+          <h1>Slipstream Archive Lab</h1>
+          <p class="hero__lede">
+            Upload season history in Markdown, compare drivers across eras, and
+            export narrative-ready visuals without a build step.
+          </p>
+        </div>
+        <div class="hero__actions">
+          <button class="button button--secondary" id="load-sample" type="button">
+            Load Demo Archive
+          </button>
+          <button class="button" id="export-summary" type="button">
+            Export Summary
+          </button>
+          <button class="button" id="export-chart" type="button">
+            Export Active Chart
+          </button>
+          <button class="button button--ghost" id="export-json" type="button">
+            Export Dataset JSON
+          </button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <!-- Sidebar holds import, dataset switching, filtering, and compare-driver selection. -->
+        <aside class="sidebar">
+          <!-- Intake controls for local Markdown files or pasted archive text. -->
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Dataset Intake</h2>
+              <span class="badge badge--accent">Markdown First</span>
+            </div>
+
+            <label class="input-label" for="dataset-upload">Upload season files</label>
+            <input
+              id="dataset-upload"
+              class="file-input"
+              type="file"
+              accept=".md,.markdown,text/markdown"
+              multiple
+            />
+
+            <label class="input-label" for="markdown-paste">Paste raw Markdown</label>
+            <textarea
+              id="markdown-paste"
+              class="textarea"
+              rows="9"
+              placeholder="Paste a season archive here. Use the demo format as your template."
+            ></textarea>
+
+            <div class="stack-inline">
+              <button class="button button--secondary" id="import-pasted" type="button">
+                Import Pasted Markdown
+              </button>
+              <button class="button button--ghost" id="clear-pasted" type="button">
+                Clear
+              </button>
+            </div>
+
+            <div class="schema-note">
+              <h3>Required sections</h3>
+              <ul class="compact-list">
+                <li><code>## Season Registry</code></li>
+                <li><code>## Weighted Score Formula</code></li>
+                <li><code>## Full Career Statistics</code></li>
+                <li><code>## CPI Rankings</code></li>
+                <li><code>## All-Time Weighted Score Rankings</code></li>
+                <li><code>## Season N Results</code> (one per season)</li>
+              </ul>
+            </div>
+          </section>
+
+          <!-- Loaded datasets are stored client-side and can be re-activated or removed here. -->
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Dataset Library</h2>
+              <span class="badge" id="dataset-count-badge">0 loaded</span>
+            </div>
+            <div id="dataset-list" class="dataset-list"></div>
+          </section>
+
+          <!-- Global filters feed the season/profile/comparison tabs, but the insights tab uses its own local controls. -->
+          <section class="panel" id="global-filters-panel">
+            <div class="section-heading">
+              <h2>Filters & Compare</h2>
+              <span class="badge badge--warning" id="selection-badge">0 drivers selected</span>
+            </div>
+
+            <div class="filter-grid">
+              <label class="field">
+                <span>Preset</span>
+                <select id="preset-select"></select>
+              </label>
+              <label class="field">
+                <span>Season</span>
+                <select id="season-select"></select>
+              </label>
+              <label class="field">
+                <span>Era</span>
+                <select id="era-select"></select>
+              </label>
+              <label class="field">
+                <span>Division</span>
+                <select id="division-select"></select>
+              </label>
+              <label class="field">
+                <span>Team</span>
+                <select id="team-select"></select>
+              </label>
+              <label class="field">
+                <span>Car</span>
+                <select id="car-select"></select>
+              </label>
+              <label class="field">
+                <span>Profile Driver</span>
+                <select id="profile-driver-select"></select>
+              </label>
+              <label class="field">
+                <span>Driver Search</span>
+                <input id="driver-search" type="search" placeholder="Search driver names" />
+              </label>
+            </div>
+
+            <div class="picker-block">
+              <div class="picker-block__title">Comparison drivers</div>
+              <div id="driver-picker" class="driver-picker"></div>
+            </div>
+
+            <div class="stack-inline">
+              <button class="button button--secondary" id="save-view" type="button">
+                Save Current View
+              </button>
+              <button class="button button--ghost" id="reset-filters" type="button">
+                Reset Filters
+              </button>
+            </div>
+
+            <div class="saved-view-block">
+              <div class="picker-block__title">Saved comparisons</div>
+              <div id="saved-views" class="saved-views"></div>
+            </div>
+          </section>
+        </aside>
+
+        <!-- Main content area is split into a summary header plus tabbed analyst views. -->
+        <main class="content">
+          <!-- Dataset summary cards and parser validations stay above the tab views. -->
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker" id="dataset-kicker">No dataset loaded</p>
+                <h2 id="dataset-title">Upload or load a Markdown archive to begin</h2>
+              </div>
+              <span class="badge badge--accent" id="dataset-status-badge">Idle</span>
+            </div>
+
+            <div id="overview-cards" class="overview-cards"></div>
+            <div id="validation-summary" class="validation-summary"></div>
+          </section>
+
+          <!-- Top-level tabs split season drill-down, single-driver profile work, multi-driver comparison, archive-wide rankings, and broader statistical insights. -->
+          <section class="panel panel--tabs">
+            <div class="tab-nav" id="view-tabs" role="tablist" aria-label="Main views">
+              <button class="tab-button is-active" type="button" data-tab="season-detail" role="tab" aria-selected="true">
+                Season Detail
+              </button>
+              <button class="tab-button" type="button" data-tab="profile" role="tab" aria-selected="false">
+                Driver Profile
+              </button>
+              <button class="tab-button" type="button" data-tab="comparison" role="tab" aria-selected="false">
+                Driver Comparison
+              </button>
+              <button class="tab-button" type="button" data-tab="greats" role="tab" aria-selected="false">
+                Great Seasons & Careers
+              </button>
+              <button class="tab-button" type="button" data-tab="insights" role="tab" aria-selected="false">
+                Totals & Insights
+              </button>
+            </div>
+          </section>
+
+          <!-- Season-detail tab: one selected season, its progression chart, and raw detail tables. -->
+          <section class="tab-panel" data-tab-panel="season-detail">
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Season Detail</p>
+                  <h2>Archive drill-down by season</h2>
+                </div>
+                <div class="detail-toolbar">
+                  <label class="field field--compact" for="detail-season-select">
+                    <span>Detail season</span>
+                    <select id="detail-season-select"></select>
+                  </label>
+                  <label class="field field--compact" for="detail-progress-mode-select">
+                    <span>Progress view</span>
+                    <select id="detail-progress-mode-select">
+                      <option value="week">By race week</option>
+                      <option value="race">By each race</option>
+                    </select>
+                  </label>
+                  <span class="badge badge--accent" id="detail-season-badge">No season selected</span>
+                </div>
+              </div>
+              <div id="season-detail-summary" class="overview-cards"></div>
+              <div id="season-progress-chart" class="season-progress-shell"></div>
+              <div id="season-class-summary" class="season-class-grid"></div>
+              <div id="season-detail-standings" class="season-detail-shell"></div>
+              <div id="season-detail-venues" class="season-venues"></div>
+            </section>
+          </section>
+
+          <!-- Driver-profile tab: single-driver totals, best seasons, and season-to-season movement. -->
+          <section class="tab-panel" data-tab-panel="profile" hidden>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Driver Profile</p>
+                  <h2>Career trajectory and index breakdown</h2>
+                </div>
+                <span class="badge badge--accent" id="profile-badge">No driver selected</span>
+              </div>
+              <div id="driver-profile" class="profile-shell"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Season Fingerprints</p>
+                  <h2>Peak campaigns at a glance</h2>
+                </div>
+                <span class="badge">Profile driver</span>
+              </div>
+              <div id="season-fingerprints" class="fingerprint-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">What Changed?</p>
+                  <h2>Season-over-season delta</h2>
+                </div>
+                <span class="badge">Trend analysis</span>
+              </div>
+              <div id="what-changed" class="changes-shell"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Track Analysis</p>
+                  <h2>Strongest tracks by adjusted score</h2>
+                </div>
+                <span class="badge badge--accent" id="track-perf-badge">Bayesian-adjusted</span>
+              </div>
+              <div id="track-performance" class="profile-shell"></div>
+            </section>
+          </section>
+
+          <!-- Comparison tab: selected-driver comparison cards and shared timeline charts. -->
+          <section class="tab-panel" data-tab-panel="comparison" hidden>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Comparison Workspace</p>
+                  <h2>Weighted score explainer</h2>
+                </div>
+                <span class="badge badge--warning">Up to 6 drivers</span>
+              </div>
+              <div id="comparison-workspace" class="comparison-shell"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Season-over-season</p>
+                  <h2>Selected driver comparison</h2>
+                </div>
+                <span class="badge">Weighted score arc</span>
+              </div>
+              <div id="comparison-season-chart" class="chart-shell"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Track Strengths</p>
+                  <h2>Top tracks per driver</h2>
+                </div>
+                <span class="badge">Top 3 each</span>
+              </div>
+              <div id="comparison-top-tracks" class="comparison-shell"></div>
+            </section>
+          </section>
+
+          <!-- Greats tab: archive-wide rankings only. -->
+          <section class="tab-panel" data-tab-panel="greats" hidden>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Rankings</p>
+                  <h2>Great Seasons & Careers</h2>
+                </div>
+                <span class="badge" id="leaderboard-context">Balanced preset</span>
+              </div>
+
+              <div class="leaderboard-stack">
+                <div>
+                  <h3>Career leaderboard</h3>
+                  <div id="career-leaderboard"></div>
+                </div>
+                <div>
+                  <h3>Season leaderboard</h3>
+                  <div id="season-leaderboard"></div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <!-- Insights tab: local controls, clickable insight cards, and a broad stats explorer that ignores the sidebar filters. -->
+          <section class="tab-panel" data-tab-panel="insights" hidden>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Totals & Weighted Score Insights</p>
+                  <h2>Broader patterns across seasons and careers</h2>
+                </div>
+                <span class="badge badge--accent" id="insights-badge">Local controls only</span>
+              </div>
+
+              <div class="insights-toolbar">
+                <label class="field field--compact" for="insights-lens-select">
+                  <span>Lens</span>
+                  <select id="insights-lens-select">
+                    <option value="season">Season insights</option>
+                    <option value="career">Career insights</option>
+                  </select>
+                </label>
+
+                <label class="field field--compact" for="insights-view-select">
+                  <span>Explorer view</span>
+                  <select id="insights-view-select">
+                    <option value="weighted">Weighted score</option>
+                    <option value="totals">Raw totals</option>
+                    <option value="pace">Raw pace</option>
+                    <option value="results">Results</option>
+                    <option value="efficiency">Efficiency</option>
+                  </select>
+                </label>
+
+                <label class="field field--compact" for="insights-era-select">
+                  <span>Era</span>
+                  <select id="insights-era-select"></select>
+                </label>
+
+                <label class="field field--compact" for="insights-division-select">
+                  <span>Division</span>
+                  <select id="insights-division-select"></select>
+                </label>
+              </div>
+
+              <div id="insights-cards" class="insights-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Insight Explorer</p>
+                  <h2 id="insights-detail-title">Explorer detail</h2>
+                </div>
+                <span class="badge" id="insights-detail-badge">Click a card to focus</span>
+              </div>
+              <div id="insights-detail-summary" class="fine-print"></div>
+              <div id="insights-detail-table" class="insights-detail-shell"></div>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="scripts/data.js"></script>
+    <script src="scripts/views-season.js"></script>
+    <script src="scripts/views-analysis.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
