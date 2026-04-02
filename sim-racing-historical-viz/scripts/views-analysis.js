@@ -199,7 +199,7 @@ function renderInsights(dataset) {
   renderInsightExplorer(activeCard);
 }
 
-// Season insight cards emphasize peak campaigns, high-quality misses, pace gaps, and year-over-year improvement.
+// Season insight cards now cover pure peaks, conversion stories, qualifying power, durability, and momentum swings.
 function buildSeasonInsightCards(records) {
   return [
     buildInsightCardModel({
@@ -247,6 +247,52 @@ function buildSeasonInsightCards(records) {
         "Positive gaps mean the season's raw pace signal was stronger than its final results signal. Negative gaps indicate especially efficient results conversion.",
     }),
     buildInsightCardModel({
+      id: "clutchConverters",
+      title: "Clutch Converters",
+      subtitle: "Seasons that beat their raw pace profile by cashing in results anyway.",
+      rowType: "season",
+      recommendedView: "results",
+      rows: records
+        .filter((record) => (record.clutchScore || 0) > 0)
+        .sort((left, right) => (right.clutchScore || 0) - (left.clutchScore || 0)),
+      metricLabel: "Clutch",
+      metricFormatter: (row) => formatPercent(row.clutchScore),
+      describeRow: (row) => `${row.driver} | ${row.seasonId}`,
+      detailTitle: "Results-first conversion seasons",
+      detailSummary:
+        "Rows are sorted by how much the final results signal outperformed the underlying pace signal inside the local insights scope.",
+    }),
+    buildInsightCardModel({
+      id: "qualifyingDemons",
+      title: "Qualifying Demons",
+      subtitle: "The seasons with the sharpest one-lap bite from poles and fastest laps.",
+      rowType: "season",
+      recommendedView: "pace",
+      rows: [...records].sort(
+        (left, right) => (right.qualifyingScore || 0) - (left.qualifyingScore || 0),
+      ),
+      metricLabel: "Qual",
+      metricFormatter: (row) => formatPercent(row.qualifyingScore),
+      describeRow: (row) => `${row.driver} | ${row.seasonId}`,
+      detailTitle: "Qualifying power seasons",
+      detailSummary:
+        "Qualifying score leans on pole rate first and uses fastest-lap rate as the tie-break signal for one-lap strength.",
+    }),
+    buildInsightCardModel({
+      id: "ironmanSeasons",
+      title: "Ironman Seasons",
+      subtitle: "Durable campaigns that kept showing up and still delivered meaningful results.",
+      rowType: "season",
+      recommendedView: "efficiency",
+      rows: [...records].sort((left, right) => (right.ironmanScore || 0) - (left.ironmanScore || 0)),
+      metricLabel: "Iron",
+      metricFormatter: (row) => formatPercent(row.ironmanScore),
+      describeRow: (row) => `${row.driver} | ${row.seasonId}`,
+      detailTitle: "Durability-heavy season leaders",
+      detailSummary:
+        "Ironman score weights participation most heavily, then uses top-five and points rate to reward seasons that stayed present without becoming empty mileage.",
+    }),
+    buildInsightCardModel({
       id: "biggestJump",
       title: "Biggest Year-over-Year Jump",
       subtitle: "The sharpest weighted-score improvement from one season to the next.",
@@ -264,6 +310,25 @@ function buildSeasonInsightCards(records) {
       detailTitle: "Year-over-year weighted-score jumps",
       detailSummary:
         "Each row compares a season against the immediately previous completed season for the same driver inside the local insights scope.",
+    }),
+    buildInsightCardModel({
+      id: "biggestDropOff",
+      title: "Biggest Drop-Offs",
+      subtitle: "The steepest weighted-score declines from one completed season to the next.",
+      rowType: "season",
+      recommendedView: "efficiency",
+      rows: records
+        .filter((record) => record.weightedScoreDeltaPrev != null && record.weightedScoreDeltaPrev < 0)
+        .sort(
+          (left, right) => (left.weightedScoreDeltaPrev || 0) - (right.weightedScoreDeltaPrev || 0),
+        ),
+      metricLabel: "Delta",
+      metricFormatter: (row) => formatDecimal(row.weightedScoreDeltaPrev),
+      describeRow: (row) =>
+        `${row.driver} | ${row.previousSeasonId || "n/a"} -> ${row.seasonId}`,
+      detailTitle: "Year-over-year weighted-score drop-offs",
+      detailSummary:
+        "Rows are limited to negative season-over-season deltas so the explorer isolates regression years instead of simply mirroring the jump card.",
     }),
   ].filter((card) => card.rows.length);
 }
@@ -328,6 +393,30 @@ function buildCareerInsightCards(rollups) {
       detailSummary:
         "Decorated score weights WDCs most heavily, WCCs second, and uses wins as a small tie-break within the local slice.",
     }),
+    buildInsightCardModel({
+      id: "trackTyrants",
+      title: "Track Tyrants",
+      subtitle: "Drivers whose best venue pairing becomes a true signature weapon.",
+      rowType: "career",
+      recommendedView: "weighted",
+      rows: [...rollups]
+        .filter((row) => row.signatureTrack)
+        .sort((left, right) => (right.signatureTrackScore || 0) - (left.signatureTrackScore || 0)),
+      metricLabel: "Score",
+      metricFormatter: (row) => formatDecimal(row.signatureTrackScore),
+      describeRow: (row) => `${row.driver} | ${row.signatureTrack?.track || "n/a"}`,
+      detailTitle: "Signature track dominance",
+      detailSummary:
+        "Each row captures the strongest single track profile for that driver inside the local scope, scored with the same Bayesian-adjusted venue model used elsewhere in the app.",
+      detailColumns: buildTrackTyrantColumns,
+      viewLabelMap: {
+        weighted: "Track score",
+        totals: "Track totals",
+        pace: "Adjusted rates",
+        results: "Track results",
+        efficiency: "Track efficiency",
+      },
+    }),
   ].filter((card) => card.rows.length);
 }
 
@@ -345,6 +434,7 @@ function buildInsightCardModel(config) {
 
 // Cards are clickable because they reconfigure the explorer table below, not just because they are decorative summaries.
 function buildInsightCardMarkup(card, isActive) {
+  const rowTypeLabel = card.rowTypeLabel || (card.rowType === "career" ? "Career insight" : "Season insight");
   return `
     <button
       class="insight-card ${isActive ? "is-active" : ""} fade-in"
@@ -352,7 +442,7 @@ function buildInsightCardMarkup(card, isActive) {
       data-insight-id="${escapeHtml(card.id)}"
       data-insight-view="${escapeHtml(card.recommendedView)}"
     >
-      <div class="insight-card__eyebrow">${escapeHtml(card.rowType === "career" ? "Career insight" : "Season insight")}</div>
+      <div class="insight-card__eyebrow">${escapeHtml(rowTypeLabel)}</div>
       <h3 class="insight-card__title">${escapeHtml(card.title)}</h3>
       <p class="insight-card__summary">${escapeHtml(card.subtitle)}</p>
       <div class="insight-card__leader">
@@ -368,14 +458,16 @@ function buildInsightCardMarkup(card, isActive) {
 
 // The explorer table below the cards keeps every insight auditable by exposing the full sorted row list behind the headline.
 function renderInsightExplorer(activeCard) {
-  const columns =
-    activeCard.rowType === "career"
+  const currentViewLabel = activeCard.viewLabelMap?.[state.insights.view] || INSIGHTS_VIEW_LABELS[state.insights.view];
+  const columns = activeCard.detailColumns
+    ? activeCard.detailColumns(state.insights.view)
+    : activeCard.rowType === "career"
       ? buildCareerInsightColumns(state.insights.view)
       : buildSeasonInsightColumns(state.insights.view);
-  const meta = `${activeCard.detailSummary} Current column view: ${INSIGHTS_VIEW_LABELS[state.insights.view]}.`;
+  const meta = `${activeCard.detailSummary} Current column view: ${currentViewLabel}.`;
 
   refs["insights-detail-title"].textContent = activeCard.detailTitle;
-  refs["insights-detail-badge"].textContent = `${activeCard.rows.length} rows | ${INSIGHTS_VIEW_LABELS[state.insights.view]}`;
+  refs["insights-detail-badge"].textContent = `${activeCard.rows.length} rows | ${currentViewLabel}`;
   refs["insights-detail-summary"].textContent = meta;
   refs["insights-detail-table"].innerHTML = buildTableCard(
     activeCard.detailTitle,
@@ -441,6 +533,87 @@ function buildSeasonInsightColumns(view) {
         label: "Prev season",
         render: (row) => row.previousSeasonId || "n/a",
       },
+    ],
+  };
+
+  return [...baseColumns, ...(viewColumns[view] || viewColumns.weighted)];
+}
+
+function buildTrackTyrantColumns(view) {
+  const baseColumns = [
+    { key: "driver", label: "Driver", strong: true },
+    {
+      key: "signatureTrack",
+      label: "Signature track",
+      strong: true,
+      render: (row) => row.signatureTrack?.track || "n/a",
+    },
+  ];
+
+  const viewColumns = {
+    weighted: [
+      {
+        key: "signatureTrackScore",
+        label: "Track score",
+        render: (row) => formatDecimal(row.signatureTrackScore),
+      },
+      { key: "signatureTrackAdjWinRate", label: "Adj win", format: "percent" },
+      { key: "signatureTrackAdjPodiumRate", label: "Adj podium", format: "percent" },
+      { key: "signatureTrackAdjTop5Rate", label: "Adj top 5", format: "percent" },
+      { key: "signatureTrackStarts", label: "Starts" },
+    ],
+    totals: [
+      { key: "signatureTrackStarts", label: "Starts" },
+      { key: "signatureTrackWins", label: "Wins" },
+      { key: "signatureTrackPodiums", label: "Podiums" },
+      { key: "signatureTrackTop5s", label: "Top 5s" },
+      {
+        key: "signatureTrackPoints",
+        label: "Points",
+        render: (row) => formatInteger(row.signatureTrack?.totalPoints),
+      },
+      { key: "trackPortfolioCount", label: "Tracks" },
+    ],
+    pace: [
+      {
+        key: "signatureTrackRawWinRate",
+        label: "Raw win",
+        render: (row) => formatPercent(row.signatureTrack?.rawWinRate),
+      },
+      { key: "signatureTrackAdjWinRate", label: "Adj win", format: "percent" },
+      {
+        key: "signatureTrackRawPodiumRate",
+        label: "Raw podium",
+        render: (row) => formatPercent(row.signatureTrack?.rawPodiumRate),
+      },
+      { key: "signatureTrackAdjPodiumRate", label: "Adj podium", format: "percent" },
+      { key: "signatureTrackStarts", label: "Starts" },
+    ],
+    results: [
+      {
+        key: "signatureTrackScore",
+        label: "Track score",
+        render: (row) => formatDecimal(row.signatureTrackScore),
+      },
+      { key: "signatureTrackWins", label: "Wins" },
+      { key: "signatureTrackPodiums", label: "Podiums" },
+      { key: "signatureTrackAdjWinRate", label: "Adj win", format: "percent" },
+      { key: "signatureTrackAdjTop5Rate", label: "Adj top 5", format: "percent" },
+    ],
+    efficiency: [
+      {
+        key: "signatureTrackPointsPerStart",
+        label: "Pts/start",
+        render: (row) => formatDecimal(row.signatureTrackPointsPerStart, 1),
+      },
+      {
+        key: "signatureTrackScore",
+        label: "Track score",
+        render: (row) => formatDecimal(row.signatureTrackScore),
+      },
+      { key: "signatureTrackAdjTop5Rate", label: "Adj top 5", format: "percent" },
+      { key: "signatureTrackStarts", label: "Starts" },
+      { key: "trackPortfolioCount", label: "Tracks" },
     ],
   };
 
