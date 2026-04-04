@@ -76,9 +76,10 @@ function renderDriverPicker() {
 
 // Leaderboards are lightweight list renders over the two ranking pipelines.
 function renderLeaderboards(dataset) {
+  const activePreset = getActivePreset();
   const careerRanking = buildCareerAggregates(dataset);
   const seasonRanking = buildSeasonRanking(dataset);
-  refs["leaderboard-context"].textContent = PRESETS[state.filters.preset].label;
+  refs["leaderboard-context"].textContent = activePreset.label;
 
   refs["career-leaderboard"].innerHTML = careerRanking.length
     ? `<div class="leaderboard-table">${careerRanking
@@ -843,6 +844,7 @@ function buildArcEndpointLabelMarkup(endpoints, width, height, padding) {
 
 // Driver profile combines static career totals with a preset-specific breakdown and narrative.
 function renderDriverProfile(dataset) {
+  const activePreset = getActivePreset();
   const ranking = buildCareerAggregates(dataset);
   const aggregate =
     ranking.find((entry) => entry.driver === state.filters.profileDriver) || ranking[0] || null;
@@ -889,7 +891,7 @@ function renderDriverProfile(dataset) {
       <div class="profile-card__header">
         <div>
           <h3 class="profile-card__title">Filtered index breakdown</h3>
-          <div class="profile-card__meta">The current preset is ${escapeHtml(PRESETS[state.filters.preset].label.toLowerCase())}</div>
+          <div class="profile-card__meta">The current preset is ${escapeHtml(activePreset.label.toLowerCase())}</div>
         </div>
         <span class="badge">${formatComposite(aggregate.composite)}</span>
       </div>
@@ -904,6 +906,7 @@ function renderDriverProfile(dataset) {
 
 // Comparison workspace explains why the current preset ranks the selected drivers the way it does.
 function renderComparisonWorkspace(dataset) {
+  const activePreset = getActivePreset();
   if (!state.selectedDrivers.length) {
     refs["comparison-workspace"].innerHTML = renderEmptyStateMarkup(
       "Select up to six drivers from the sidebar to compare their weighted-score makeup.",
@@ -925,7 +928,7 @@ function renderComparisonWorkspace(dataset) {
             <div class="comparison-card__header">
               <div>
                 <h3 class="comparison-card__title">Composite comparison</h3>
-                <div class="profile-card__meta">${escapeHtml(PRESETS[state.filters.preset].description)}</div>
+                <div class="profile-card__meta">${escapeHtml(activePreset.description)}</div>
               </div>
             </div>
             <div class="comparison-grid">
@@ -939,9 +942,9 @@ function renderComparisonWorkspace(dataset) {
                 <div class="profile-card__meta">Each band shows the weighted share of the current comparison score.</div>
               </div>
             </div>
-            <div class="subtle-text">${escapeHtml(buildPresetExplanation(PRESETS[state.filters.preset]))}</div>
+            <div class="subtle-text">${escapeHtml(buildPresetExplanation(activePreset))}</div>
             <div class="pill-row">
-              ${Object.entries(PRESETS[state.filters.preset].careerWeights)
+              ${Object.entries(activePreset.careerWeights)
                 .map(
                   ([key, weight]) =>
                     `<span class="pill" style="background:${hexToAlpha(METRIC_COLORS[key], 0.13)};color:${METRIC_COLORS[key]}">${escapeHtml(metricLabel(key))} ${Math.round(weight * 100)}%</span>`,
@@ -955,7 +958,7 @@ function renderComparisonWorkspace(dataset) {
             <div class="comparison-card__header">
               <div>
                 <h3 class="comparison-card__title">Composite comparison</h3>
-                <div class="profile-card__meta">${escapeHtml(PRESETS[state.filters.preset].description)}</div>
+                <div class="profile-card__meta">${escapeHtml(activePreset.description)}</div>
               </div>
             </div>
             ${renderEmptyStateMarkup("No selected drivers match the current filter slice for the preset comparison.")}
@@ -1419,5 +1422,5 @@ function buildDriverNarrative(aggregate, sliceDescriptor) {
 
 function buildSavedViewLabel(dataset) {
   const focus = state.filters.profileDriver || state.selectedDrivers[0] || "slice";
-  return `${focus} | ${PRESETS[state.filters.preset].label} | ${dataset.title}`;
+  return `${focus} | ${getActivePreset().label} | ${dataset.title}`;
 }
