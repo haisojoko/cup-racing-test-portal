@@ -441,10 +441,9 @@ function buildFilterOptions(dataset) {
     cars: uniqueList(dataset.seasonCatalog.map((season) => season.car))
       .filter(Boolean)
       .map((value) => ({ value, label: value })),
-    drivers: dataset.careerRecords.map((record) => ({
-      value: record.driver,
-      label: record.driver,
-    })),
+    drivers: dataset.careerRecords
+      .map((record) => ({ value: record.driver, label: record.driver }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   };
 }
 
