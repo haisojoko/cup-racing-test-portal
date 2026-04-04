@@ -1060,6 +1060,10 @@ input[type="text"] {
   gap: 0.8rem;
 }
 
+.comparison-card--wide {
+  grid-column: 1 / -1;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1144,6 +1148,77 @@ input[type="text"] {
 .comparison-driver__score {
   color: var(--accent);
   font-weight: 900;
+}
+
+.spec-split-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.spec-split-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.8rem;
+  border-radius: var(--radius-md);
+  background: rgba(249, 243, 237, 0.82);
+  border: 1px solid rgba(91, 66, 48, 0.09);
+}
+
+.spec-split-card.is-empty {
+  align-content: start;
+}
+
+.spec-split-card__title {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.spec-split-card__score {
+  color: var(--accent);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.spec-split-card__meta {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.spec-split-bar {
+  width: 100%;
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(91, 66, 48, 0.1);
+}
+
+.spec-split-bar__fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 300ms ease;
+}
+
+.spec-split-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.spec-split-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.32rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text);
+  font-size: 0.77rem;
+  font-weight: 700;
 }
 
 .contribution-track {
@@ -1356,6 +1431,10 @@ input[type="text"] {
 
   .tab-button {
     width: 100%;
+  }
+
+  .spec-split-grid {
+    grid-template-columns: 1fr;
   }
 
   .leaderboard-row {

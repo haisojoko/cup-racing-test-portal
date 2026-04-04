@@ -904,45 +904,73 @@ function renderDriverProfile(dataset) {
 
 // Comparison workspace explains why the current preset ranks the selected drivers the way it does.
 function renderComparisonWorkspace(dataset) {
-  const ranking = buildCareerAggregates(dataset);
-  const selected = state.selectedDrivers
-    .map((driver) => ranking.find((entry) => entry.driver === driver))
-    .filter(Boolean);
-
-  if (!selected.length) {
+  if (!state.selectedDrivers.length) {
     refs["comparison-workspace"].innerHTML = renderEmptyStateMarkup(
       "Select up to six drivers from the sidebar to compare their weighted-score makeup.",
     );
     return;
   }
 
+  const ranking = buildCareerAggregates(dataset);
+  const selected = state.selectedDrivers
+    .map((driver) => ranking.find((entry) => entry.driver === driver))
+    .filter(Boolean);
+  const carSpecBreakdown = buildDriverCarSpecBreakdown(dataset, state.selectedDrivers);
+
   refs["comparison-workspace"].innerHTML = `
-    <article class="comparison-card fade-in">
+    ${
+      selected.length
+        ? `
+          <article class="comparison-card fade-in">
+            <div class="comparison-card__header">
+              <div>
+                <h3 class="comparison-card__title">Composite comparison</h3>
+                <div class="profile-card__meta">${escapeHtml(PRESETS[state.filters.preset].description)}</div>
+              </div>
+            </div>
+            <div class="comparison-grid">
+              ${selected.map((aggregate) => buildComparisonDriverCard(aggregate)).join("")}
+            </div>
+          </article>
+          <article class="comparison-card fade-in">
+            <div class="comparison-card__header">
+              <div>
+                <h3 class="comparison-card__title">Reading the preset</h3>
+                <div class="profile-card__meta">Each band shows the weighted share of the current comparison score.</div>
+              </div>
+            </div>
+            <div class="subtle-text">${escapeHtml(buildPresetExplanation(PRESETS[state.filters.preset]))}</div>
+            <div class="pill-row">
+              ${Object.entries(PRESETS[state.filters.preset].careerWeights)
+                .map(
+                  ([key, weight]) =>
+                    `<span class="pill" style="background:${hexToAlpha(METRIC_COLORS[key], 0.13)};color:${METRIC_COLORS[key]}">${escapeHtml(metricLabel(key))} ${Math.round(weight * 100)}%</span>`,
+                )
+                .join("")}
+            </div>
+          </article>
+        `
+        : `
+          <article class="comparison-card fade-in">
+            <div class="comparison-card__header">
+              <div>
+                <h3 class="comparison-card__title">Composite comparison</h3>
+                <div class="profile-card__meta">${escapeHtml(PRESETS[state.filters.preset].description)}</div>
+              </div>
+            </div>
+            ${renderEmptyStateMarkup("No selected drivers match the current filter slice for the preset comparison.")}
+          </article>
+        `
+    }
+    <article class="comparison-card comparison-card--wide fade-in">
       <div class="comparison-card__header">
         <div>
-          <h3 class="comparison-card__title">Composite comparison</h3>
-          <div class="profile-card__meta">${escapeHtml(PRESETS[state.filters.preset].description)}</div>
+          <h3 class="comparison-card__title">Formula vs Sports</h3>
+          <div class="profile-card__meta">Uses the current comparison slice, but keeps both divisions visible for the split.</div>
         </div>
       </div>
       <div class="comparison-grid">
-        ${selected.map((aggregate) => buildComparisonDriverCard(aggregate)).join("")}
-      </div>
-    </article>
-    <article class="comparison-card fade-in">
-      <div class="comparison-card__header">
-        <div>
-          <h3 class="comparison-card__title">Reading the preset</h3>
-          <div class="profile-card__meta">Each band shows the weighted share of the current comparison score.</div>
-        </div>
-      </div>
-      <div class="subtle-text">${escapeHtml(buildPresetExplanation(PRESETS[state.filters.preset]))}</div>
-      <div class="pill-row">
-        ${Object.entries(PRESETS[state.filters.preset].careerWeights)
-          .map(
-            ([key, weight]) =>
-              `<span class="pill" style="background:${hexToAlpha(METRIC_COLORS[key], 0.13)};color:${METRIC_COLORS[key]}">${escapeHtml(metricLabel(key))} ${Math.round(weight * 100)}%</span>`,
-          )
-          .join("")}
+        ${state.selectedDrivers.map((driver) => buildCarSpecComparisonCard(driver, carSpecBreakdown[driver])).join("")}
       </div>
     </article>
   `;
@@ -1290,6 +1318,70 @@ function buildComparisonDriverCard(aggregate) {
       <div class="contribution-list">${list}</div>
     </div>
   `;
+}
+
+function buildCarSpecComparisonCard(driver, breakdown) {
+  const formula = breakdown && breakdown.specs ? breakdown.specs.formula : null;
+  const sports = breakdown && breakdown.specs ? breakdown.specs.sports : null;
+  const maxAvgWs = Math.max(formula ? formula.avgWs || 0 : 0, sports ? sports.avgWs || 0 : 0, 0);
+  const color = colorForDriver(driver);
+
+  return `
+    <div class="comparison-driver">
+      <div class="comparison-driver__header" style="border-color:${color}">
+        <span class="comparison-driver__name">${escapeHtml(driver)}</span>
+      </div>
+      <div class="spec-split-grid">
+        ${buildCarSpecComparisonPanel({ label: "Formula", color: "#415e97" }, formula, maxAvgWs)}
+        ${buildCarSpecComparisonPanel({ label: "Sports", color: "#b7421b" }, sports, maxAvgWs)}
+      </div>
+      <div class="fine-print">${escapeHtml(buildCarSpecEdgeText(breakdown))}</div>
+    </div>
+  `;
+}
+
+function buildCarSpecComparisonPanel(specMeta, specRecord, maxAvgWs) {
+  if (!specRecord) {
+    return `
+      <div class="spec-split-card is-empty">
+        <div class="spec-split-card__title">
+          <strong>${escapeHtml(specMeta.label)}</strong>
+        </div>
+        <div class="subtle-text">No ${escapeHtml(specMeta.label.toLowerCase())} results in this slice.</div>
+      </div>
+    `;
+  }
+
+  const barWidth = maxAvgWs > 0 ? Math.round(((specRecord.avgWs || 0) / maxAvgWs) * 100) : 0;
+  return `
+    <div class="spec-split-card">
+      <div class="spec-split-card__title">
+        <strong>${escapeHtml(specMeta.label)}</strong>
+        <span class="spec-split-card__score">${formatDecimal(specRecord.avgWs)}</span>
+      </div>
+      <div class="spec-split-card__meta">Average weighted score</div>
+      <div class="spec-split-bar">
+        <div class="spec-split-bar__fill" style="width:${barWidth}%;background:linear-gradient(90deg, ${specMeta.color}, ${hexToAlpha(specMeta.color, 0.45)})"></div>
+      </div>
+      <div class="spec-split-pills">
+        <span class="spec-split-pill">Seasons ${formatInteger(specRecord.seasonsCount)}</span>
+        <span class="spec-split-pill">Avg pts ${formatPercent(specRecord.avgPointsRate)}</span>
+        <span class="spec-split-pill">Avg win ${formatPercent(specRecord.avgWinRate)}</span>
+        <span class="spec-split-pill">${formatInteger(specRecord.totalWdc)} WDC / ${formatInteger(specRecord.totalWcc)} WCC</span>
+      </div>
+      <div class="subtle-text">Peak ${escapeHtml(specRecord.peakSeasonId || "n/a")} | ${formatDecimal(specRecord.peakWs)}</div>
+    </div>
+  `;
+}
+
+function buildCarSpecEdgeText(breakdown) {
+  if (!breakdown || !breakdown.bestSpec) {
+    return "No formula or sports results match the current filter slice.";
+  }
+  if (breakdown.edge == null) {
+    return `${breakdown.bestSpec.label} is the only matching spec in this slice.`;
+  }
+  return `${breakdown.bestSpec.label} has the stronger average weighted score in this slice (+${formatDecimal(breakdown.edge)}).`;
 }
 
 function buildPresetExplanation(preset) {
