@@ -1171,7 +1171,7 @@ function buildCareerAggregates(dataset) {
     })
     .filter((aggregate) => aggregate.slice.length || isNoSliceFilterActive());
 
-  return scoreCareerAggregates(aggregates, PRESETS[state.filters.preset]);
+  return scoreCareerAggregates(aggregates, getActivePreset());
 }
 
 // Presets score normalized career metrics against the strongest driver in the current slice.
@@ -1404,7 +1404,7 @@ function buildDriverCarSpecBreakdown(dataset, drivers) {
 // Season ranking uses the same preset concept, but applies it at a single-season level.
 function buildSeasonRanking(dataset) {
   const records = getFilteredSeasonRecords(dataset);
-  const preset = PRESETS[state.filters.preset];
+  const preset = getActivePreset();
   const metricMax = {
     weightedScore: maxOf(records, (record) => record.weightedScore),
     pointsRate: maxOf(records, (record) => record.pointsRate),

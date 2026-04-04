@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
   datasets: "slipstream.datasets.v1",
   activeDatasetId: "slipstream.activeDatasetId.v1",
   savedViews: "slipstream.savedViews.v1",
+  customPresets: "slipstream.customPresets.v1",
   driverColors: "slipstream.driverColors.v1",
   trackAggregates: "slipstream.trackAggregates.v1",
 };
@@ -43,6 +44,32 @@ const METRIC_COLORS = {
   pointsRate: "#0b756f",
   top5Rate: "#415e97",
 };
+
+const CAREER_PRESET_METRICS = [
+  "cpi",
+  "avgWs",
+  "peakWs",
+  "avgPtsRate",
+  "avgTop5Rate",
+  "avgWinRate",
+  "avgPodiumRate",
+  "avgFastestLapRate",
+  "avgPoleRate",
+  "titles",
+  "participation",
+];
+
+const SEASON_PRESET_METRICS = [
+  "weightedScore",
+  "pointsRate",
+  "top5Rate",
+  "winRate",
+  "podiumRate",
+  "fastestLapRate",
+  "poleRate",
+  "titles",
+  "participation",
+];
 
 const PRESETS = {
   balanced: {
@@ -157,6 +184,8 @@ const state = {
   insights: getDefaultInsightsFilters(),
   selectedDrivers: [],
   savedViews: [],
+  customPresets: {},
+  presetLab: getDefaultPresetLabState(),
   driverColors: {},
   pendingColorDriver: "",
   trackAggregateCache: {},
@@ -166,6 +195,15 @@ const state = {
 const refs = {};
 
 document.addEventListener("DOMContentLoaded", init);
+
+function getDefaultPresetLabState() {
+  return {
+    sourcePresetId: "balanced",
+    customPresetId: "",
+    dirty: false,
+    collapsed: false,
+  };
+}
 
 function getDefaultFilters() {
   return {
@@ -191,6 +229,41 @@ function getDefaultInsightsFilters() {
     division: "all",
     activeInsight: "strongestPeaks",
   };
+}
+
+function getPresetRegistry() {
+  return { ...PRESETS, ...state.customPresets };
+}
+
+function getCustomPresetEntries() {
+  return Object.entries(state.customPresets).sort(([, left], [, right]) =>
+    left.label.localeCompare(right.label, undefined, { sensitivity: "base" }),
+  );
+}
+
+function getPresetById(presetId) {
+  return getPresetRegistry()[presetId] || PRESETS.balanced;
+}
+
+function getValidPresetId(presetId) {
+  return getPresetRegistry()[presetId] ? presetId : "balanced";
+}
+
+function syncActivePresetSelection() {
+  const nextPresetId = getValidPresetId(state.filters.preset);
+  state.filters.preset = nextPresetId;
+  if (refs["preset-select"]) {
+    refs["preset-select"].value = nextPresetId;
+  }
+  return nextPresetId;
+}
+
+function getActivePreset() {
+  return getPresetById(syncActivePresetSelection());
+}
+
+function isCustomPresetId(presetId) {
+  return Object.prototype.hasOwnProperty.call(state.customPresets, presetId);
 }
 
 function getActiveDataset() {
@@ -272,6 +345,7 @@ function init() {
   cacheRefs();
   ensureDriverColorPicker();
   seedPresetOptions();
+  renderPresetLab();
   bindEvents();
   hydrateState();
   render();
@@ -293,6 +367,7 @@ function cacheRefs() {
     "dataset-count-badge",
     "selection-badge",
     "preset-select",
+    "preset-lab",
     "season-select",
     "era-select",
     "division-select",
@@ -346,10 +421,452 @@ function cacheRefs() {
 }
 
 function seedPresetOptions() {
-  refs["preset-select"].innerHTML = Object.entries(PRESETS)
-    .map(([value, preset]) => `<option value="${value}">${escapeHtml(preset.label)}</option>`)
-    .join("");
-  refs["preset-select"].value = state.filters.preset;
+  const customEntries = getCustomPresetEntries();
+  refs["preset-select"].innerHTML = [
+    `<optgroup label="Built-in presets">${Object.entries(PRESETS)
+      .map(([value, preset]) => `<option value="${value}">${escapeHtml(preset.label)}</option>`)
+      .join("")}</optgroup>`,
+    customEntries.length
+      ? `<optgroup label="Saved custom presets">${customEntries
+          .map(([value, preset]) => `<option value="${value}">${escapeHtml(preset.label)}</option>`)
+          .join("")}</optgroup>`
+      : "",
+  ].join("");
+  syncActivePresetSelection();
+}
+
+function renderPresetLab(presetId = state.filters.preset) {
+  loadPresetLab(presetId);
+}
+
+function loadPresetLab(presetId = state.filters.preset) {
+  if (!refs["preset-lab"]) {
+    return;
+  }
+
+  const activePresetId = syncActivePresetSelection();
+  const sourcePresetId = getValidPresetId(presetId || activePresetId);
+  const sourcePreset = getPresetById(sourcePresetId);
+
+  state.presetLab.sourcePresetId = sourcePresetId;
+  state.presetLab.customPresetId = isCustomPresetId(sourcePresetId) ? sourcePresetId : "";
+  state.presetLab.dirty = false;
+
+  refs["preset-lab"].innerHTML = `
+    <div class="preset-lab__card">
+      <div class="preset-lab__header">
+        <div>
+          <h3 class="preset-lab__title">Build a saved ranking lens</h3>
+          <div class="subtle-text">Clone the active preset, tune the weight mix, and save it as a reusable custom preset.</div>
+        </div>
+        <div class="preset-lab__header-actions">
+          <span class="badge badge--accent" data-preset-lab-status></span>
+          <button class="mini-button" type="button" data-preset-lab-action="toggle-collapse"></button>
+        </div>
+      </div>
+
+      <div class="preset-lab__body" data-preset-lab-body${state.presetLab.collapsed ? " hidden" : ""}>
+        <div class="preset-lab__summary">
+          <div class="stat-pair">
+            <div class="stat-pair__label">Active ranking</div>
+            <span class="stat-pair__value preset-lab__summary-value" data-preset-lab-active-label>${escapeHtml(getActivePreset().label)}</span>
+          </div>
+          <div class="stat-pair">
+            <div class="stat-pair__label">Draft source</div>
+            <span class="stat-pair__value preset-lab__summary-value" data-preset-lab-source-label>${escapeHtml(sourcePreset.label)}</span>
+          </div>
+        </div>
+
+        <div class="preset-lab__fields">
+          <label class="field">
+            <span>Preset name</span>
+            <input
+              type="text"
+              value="${escapeHtml(sourcePreset.label)}"
+              data-preset-lab-field="label"
+              placeholder="Weekend warrior lens"
+            />
+          </label>
+          <label class="field">
+            <span>Description</span>
+            <textarea class="textarea preset-lab__description" rows="3" data-preset-lab-field="description" placeholder="Explain what this preset values most.">${escapeHtml(sourcePreset.description || "")}</textarea>
+          </label>
+        </div>
+
+        <div class="preset-lab__groups">
+          <section class="preset-lab__group">
+            <div class="preset-lab__group-header">
+              <div>
+                <h3 class="preset-lab__group-title">Career weights</h3>
+                <div class="fine-print">Used for driver profile, career leaderboard, and comparison ranking.</div>
+              </div>
+              <span class="badge" data-preset-lab-total="career">0%</span>
+            </div>
+            <div class="preset-lab__metric-grid">
+              ${CAREER_PRESET_METRICS.map((key) => buildPresetLabMetricInput("career", key, sourcePreset.careerWeights)).join("")}
+            </div>
+          </section>
+
+          <section class="preset-lab__group">
+            <div class="preset-lab__group-header">
+              <div>
+                <h3 class="preset-lab__group-title">Season weights</h3>
+                <div class="fine-print">Used for the all-time season leaderboard inside the current filter slice.</div>
+              </div>
+              <span class="badge" data-preset-lab-total="season">0%</span>
+            </div>
+            <div class="preset-lab__metric-grid">
+              ${SEASON_PRESET_METRICS.map((key) => buildPresetLabMetricInput("season", key, sourcePreset.seasonWeights)).join("")}
+            </div>
+          </section>
+        </div>
+
+        <div class="preset-lab__actions">
+          <button class="mini-button" type="button" data-preset-lab-action="load-active">Load Active Preset</button>
+          <button class="mini-button" type="button" data-preset-lab-action="reset-draft">Reset Draft</button>
+          <button class="button button--secondary" type="button" data-preset-lab-action="save"></button>
+          ${
+            state.presetLab.customPresetId
+              ? `<button class="mini-button mini-button--danger" type="button" data-preset-lab-action="delete">Delete Saved Preset</button>`
+              : ""
+          }
+        </div>
+
+        <div class="fine-print" data-preset-lab-note>
+          Enter percentage weights for each group. Totals do not have to equal 100% because the app normalizes them when you save.
+        </div>
+      </div>
+    </div>
+  `;
+
+  updatePresetLabUi();
+}
+
+function buildPresetLabMetricInput(scope, key, weights) {
+  const color = METRIC_COLORS[key] || "#6a5748";
+  return `
+    <label class="preset-lab__metric-row">
+      <span class="preset-lab__metric-name">
+        <span class="preset-lab__metric-dot" style="background:${color}"></span>
+        ${escapeHtml(metricLabel(key))}
+      </span>
+      <span class="preset-lab__metric-input-wrap">
+        <input
+          class="preset-lab__metric-input"
+          type="number"
+          min="0"
+          step="0.1"
+          value="${escapeHtml(formatPresetLabPercentage((weights?.[key] || 0) * 100))}"
+          data-preset-scope="${scope}"
+          data-metric="${key}"
+        />
+        <span>%</span>
+      </span>
+    </label>
+  `;
+}
+
+function handlePresetLabClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const button = target.closest("button[data-preset-lab-action]");
+  if (!button) {
+    return;
+  }
+
+  const action = button.dataset.presetLabAction;
+  if (action === "toggle-collapse") {
+    state.presetLab.collapsed = !state.presetLab.collapsed;
+    applyPresetLabCollapseState();
+    return;
+  }
+
+  if (action === "load-active") {
+    loadPresetLab(state.filters.preset);
+    return;
+  }
+
+  if (action === "reset-draft") {
+    loadPresetLab(state.presetLab.customPresetId || state.presetLab.sourcePresetId || state.filters.preset);
+    return;
+  }
+
+  if (action === "save") {
+    savePresetLab();
+    return;
+  }
+
+  if (action === "delete") {
+    deletePresetLabPreset();
+  }
+}
+
+function handlePresetLabInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const isLabField = target.matches("[data-preset-lab-field], [data-preset-scope][data-metric]");
+  if (!isLabField) {
+    return;
+  }
+
+  if (target.matches("[data-preset-scope][data-metric]") && event.type === "change") {
+    target.value = formatPresetLabPercentage(sanitizePresetLabInput(target.value));
+  }
+
+  state.presetLab.dirty = true;
+  updatePresetLabUi();
+}
+
+function updatePresetLabUi() {
+  if (!refs["preset-lab"]) {
+    return;
+  }
+
+  const careerTotal = sumPresetLabInputs("career");
+  const seasonTotal = sumPresetLabInputs("season");
+  const careerBadge = refs["preset-lab"].querySelector('[data-preset-lab-total="career"]');
+  const seasonBadge = refs["preset-lab"].querySelector('[data-preset-lab-total="season"]');
+  const statusBadge = refs["preset-lab"].querySelector("[data-preset-lab-status]");
+  const saveButton = refs["preset-lab"].querySelector('[data-preset-lab-action="save"]');
+  const note = refs["preset-lab"].querySelector("[data-preset-lab-note]");
+  const activeLabel = refs["preset-lab"].querySelector("[data-preset-lab-active-label]");
+  const hasValidTotals = careerTotal > 0 && seasonTotal > 0;
+
+  if (activeLabel) {
+    activeLabel.textContent = getActivePreset().label;
+  }
+
+  if (careerBadge) {
+    careerBadge.textContent = `${formatPresetLabPercentage(careerTotal)}%`;
+    careerBadge.classList.toggle("badge--warning", careerTotal <= 0);
+  }
+
+  if (seasonBadge) {
+    seasonBadge.textContent = `${formatPresetLabPercentage(seasonTotal)}%`;
+    seasonBadge.classList.toggle("badge--warning", seasonTotal <= 0);
+  }
+
+  if (statusBadge) {
+    if (state.presetLab.customPresetId) {
+      statusBadge.textContent = state.presetLab.dirty ? "Unsaved custom changes" : "Editing saved custom";
+    } else {
+      statusBadge.textContent = state.presetLab.dirty ? "Unsaved new custom" : "Ready for custom save";
+    }
+  }
+
+  if (saveButton) {
+    saveButton.textContent = state.presetLab.customPresetId ? "Update Custom Preset" : "Save Custom Preset";
+    saveButton.disabled = !hasValidTotals;
+    saveButton.title = hasValidTotals ? "" : "Career and season totals both need to be above 0%.";
+  }
+
+  if (note) {
+    note.textContent = hasValidTotals
+      ? "Enter percentage weights for each group. Totals do not have to equal 100% because the app normalizes them when you save."
+      : "Both the career and season groups need at least some non-zero weight before the preset can be saved.";
+  }
+
+  applyPresetLabCollapseState();
+}
+
+function applyPresetLabCollapseState() {
+  if (!refs["preset-lab"]) {
+    return;
+  }
+
+  const card = refs["preset-lab"].querySelector(".preset-lab__card");
+  const body = refs["preset-lab"].querySelector("[data-preset-lab-body]");
+  const toggleButton = refs["preset-lab"].querySelector('[data-preset-lab-action="toggle-collapse"]');
+  const isCollapsed = Boolean(state.presetLab.collapsed);
+
+  if (card) {
+    card.classList.toggle("is-collapsed", isCollapsed);
+  }
+
+  if (body) {
+    body.hidden = isCollapsed;
+  }
+
+  if (toggleButton) {
+    toggleButton.textContent = isCollapsed ? "Expand" : "Minimize";
+    toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+    toggleButton.title = isCollapsed ? "Expand the Custom Preset Lab" : "Minimize the Custom Preset Lab";
+  }
+}
+
+function sumPresetLabInputs(scope) {
+  if (!refs["preset-lab"]) {
+    return 0;
+  }
+
+  return Array.from(refs["preset-lab"].querySelectorAll(`[data-preset-scope="${scope}"][data-metric]`)).reduce(
+    (sum, input) => sum + sanitizePresetLabInput(input.value),
+    0,
+  );
+}
+
+function readPresetLabDraft() {
+  if (!refs["preset-lab"]) {
+    return null;
+  }
+
+  const labelInput = refs["preset-lab"].querySelector('[data-preset-lab-field="label"]');
+  const descriptionInput = refs["preset-lab"].querySelector('[data-preset-lab-field="description"]');
+  return {
+    label: normalizePresetText(labelInput?.value),
+    description: normalizePresetText(descriptionInput?.value),
+    careerWeights: readPresetLabWeights("career", CAREER_PRESET_METRICS),
+    seasonWeights: readPresetLabWeights("season", SEASON_PRESET_METRICS),
+  };
+}
+
+function readPresetLabWeights(scope, metricKeys) {
+  if (!refs["preset-lab"]) {
+    return {};
+  }
+
+  return metricKeys.reduce((weights, key) => {
+    const input = refs["preset-lab"].querySelector(`[data-preset-scope="${scope}"][data-metric="${key}"]`);
+    weights[key] = sanitizePresetLabInput(input?.value);
+    return weights;
+  }, {});
+}
+
+function savePresetLab() {
+  const draft = readPresetLabDraft();
+  if (!draft) {
+    return;
+  }
+
+  if (!draft.label) {
+    showErrorBanner("Custom presets need a name before they can be saved.");
+    return;
+  }
+
+  const careerWeights = normalizePresetWeightGroup(draft.careerWeights, CAREER_PRESET_METRICS);
+  const seasonWeights = normalizePresetWeightGroup(draft.seasonWeights, SEASON_PRESET_METRICS);
+  if (!careerWeights || !seasonWeights) {
+    showErrorBanner("Both the career and season weight groups need at least one non-zero value.");
+    return;
+  }
+
+  const presetId = state.presetLab.customPresetId || createId("preset");
+  const existingPreset = state.customPresets[presetId] || null;
+  const nextPreset = {
+    id: presetId,
+    label: draft.label,
+    description:
+      draft.description ||
+      `Custom preset built from ${getPresetById(state.presetLab.sourcePresetId).label.toLowerCase()}.`,
+    careerWeights,
+    seasonWeights,
+    createdAt: existingPreset?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  state.customPresets = {
+    ...state.customPresets,
+    [presetId]: nextPreset,
+  };
+  state.filters.preset = presetId;
+  persistCustomPresets();
+  seedPresetOptions();
+  loadPresetLab(presetId);
+  renderAnalysisView();
+}
+
+function deletePresetLabPreset() {
+  const presetId = state.presetLab.customPresetId;
+  if (!presetId || !state.customPresets[presetId]) {
+    return;
+  }
+
+  const presetLabel = state.customPresets[presetId].label;
+  if (!window.confirm(`Delete the saved preset "${presetLabel}"?`)) {
+    return;
+  }
+
+  const nextCustomPresets = { ...state.customPresets };
+  delete nextCustomPresets[presetId];
+  state.customPresets = nextCustomPresets;
+
+  if (state.filters.preset === presetId) {
+    state.filters.preset = "balanced";
+  }
+
+  persistCustomPresets();
+  seedPresetOptions();
+  loadPresetLab(state.filters.preset);
+  renderAnalysisView();
+}
+
+function sanitizePresetLabInput(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return 0;
+  }
+  return Number(numeric.toFixed(1));
+}
+
+function formatPresetLabPercentage(value) {
+  return Number((Number(value) || 0).toFixed(1)).toString();
+}
+
+function normalizePresetWeightGroup(rawWeights, metricKeys) {
+  const weightsByKey = metricKeys.reduce((weights, key) => {
+    weights[key] = sanitizePresetLabInput(rawWeights?.[key]);
+    return weights;
+  }, {});
+  const total = Object.values(weightsByKey).reduce((sum, value) => sum + value, 0);
+
+  if (total <= 0) {
+    return null;
+  }
+
+  return metricKeys.reduce((weights, key) => {
+    const weight = weightsByKey[key];
+    if (weight > 0) {
+      weights[key] = Number((weight / total).toFixed(4));
+    }
+    return weights;
+  }, {});
+}
+
+function normalizeCustomPresets(rawPresets) {
+  if (!rawPresets || typeof rawPresets !== "object" || Array.isArray(rawPresets)) {
+    return {};
+  }
+
+  return Object.entries(rawPresets).reduce((presets, [presetId, preset]) => {
+    if (Object.prototype.hasOwnProperty.call(PRESETS, presetId)) {
+      return presets;
+    }
+
+    const label = normalizePresetText(preset?.label);
+    const description = normalizePresetText(preset?.description);
+    const careerWeights = normalizePresetWeightGroup(preset?.careerWeights, CAREER_PRESET_METRICS);
+    const seasonWeights = normalizePresetWeightGroup(preset?.seasonWeights, SEASON_PRESET_METRICS);
+    if (!label || !careerWeights || !seasonWeights) {
+      return presets;
+    }
+
+    presets[presetId] = {
+      id: presetId,
+      label,
+      description,
+      careerWeights,
+      seasonWeights,
+      createdAt: preset?.createdAt || "",
+      updatedAt: preset?.updatedAt || "",
+    };
+    return presets;
+  }, {});
 }
 
 // All user interactions funnel through this event layer, then trigger centralized renders.
@@ -403,10 +920,19 @@ function bindEvents() {
   });
 
   refs["preset-select"].addEventListener("change", (event) => {
-    state.filters.preset = event.target.value;
+    state.filters.preset = getValidPresetId(event.target.value);
+    if (!state.presetLab.dirty) {
+      loadPresetLab(state.filters.preset);
+    } else {
+      updatePresetLabUi();
+    }
     persistViews();
     renderAnalysisView();
   });
+
+  refs["preset-lab"].addEventListener("click", handlePresetLabClick);
+  refs["preset-lab"].addEventListener("input", handlePresetLabInput);
+  refs["preset-lab"].addEventListener("change", handlePresetLabInput);
 
   ["season-select", "era-select", "division-select", "team-select", "car-select"].forEach((id) => {
     refs[id].addEventListener("change", (event) => {
@@ -480,11 +1006,14 @@ function bindEvents() {
   });
 
   refs["reset-filters"].addEventListener("click", () => {
-    const preset = state.filters.preset;
+    const preset = getValidPresetId(state.filters.preset);
     state.filters = getDefaultFilters();
     state.filters.preset = preset;
     state.selectedDrivers = [];
     syncSelectionDefaults(getActiveDataset());
+    if (!state.presetLab.dirty) {
+      loadPresetLab(state.filters.preset);
+    }
     renderAnalysisView();
   });
 
@@ -558,8 +1087,14 @@ function bindEvents() {
     if (button.dataset.viewAction === "apply") {
       state.activeDatasetId = view.datasetId;
       state.filters = { ...getDefaultFilters(), ...view.filters };
+      state.filters.preset = getValidPresetId(state.filters.preset);
       state.selectedDrivers = [...view.selectedDrivers];
       syncSelectionDefaults(getActiveDataset(), true);
+      if (!state.presetLab.dirty) {
+        loadPresetLab(state.filters.preset);
+      } else {
+        updatePresetLabUi();
+      }
       persistDatasets();
       render();
     }
@@ -614,6 +1149,8 @@ function hydrateState() {
     state.savedViews = savedViews;
   }
 
+  state.customPresets = normalizeCustomPresets(readJson(STORAGE_KEYS.customPresets, {}));
+
   const driverColors = readJson(STORAGE_KEYS.driverColors, {});
   if (driverColors && typeof driverColors === "object" && !Array.isArray(driverColors)) {
     state.driverColors = driverColors;
@@ -640,6 +1177,8 @@ function hydrateState() {
   }
 
   syncSelectionDefaults(getActiveDataset());
+  seedPresetOptions();
+  loadPresetLab(state.filters.preset);
 }
 
 // Parse and register a new dataset, replacing an older copy when the same file is re-imported.
@@ -658,7 +1197,7 @@ function importDataset(name, rawMarkdown, source) {
     }
 
     state.activeDatasetId = dataset.id;
-    state.filters = { ...getDefaultFilters(), preset: state.filters.preset };
+    state.filters = { ...getDefaultFilters(), preset: getValidPresetId(state.filters.preset) };
     state.selectedDrivers = [];
     syncSelectionDefaults(dataset);
     state.trackAggregateCache[dataset.id] = buildTrackAggregates(dataset);
@@ -714,6 +1253,7 @@ function renderAnalysisView() {
 }
 
 function renderAnalysisPanels(dataset) {
+  syncActivePresetSelection();
   syncSelectionDefaults(dataset, true);
   populateFilterControls(dataset);
   populateInsightsControls(dataset);
@@ -896,7 +1436,7 @@ function populateFilterControls(dataset) {
     state.filters.profileDriver,
   );
 
-  refs["preset-select"].value = state.filters.preset;
+  refs["preset-select"].value = syncActivePresetSelection();
   refs["driver-search"].value = state.filters.driverSearch;
   refs["detail-progress-mode-select"].value = state.filters.detailProgressMode;
 }
@@ -932,6 +1472,7 @@ function exportSummary() {
     return;
   }
 
+  const activePreset = getActivePreset();
   const ranking = buildCareerAggregates(dataset);
   const seasonRanking = buildSeasonRanking(dataset);
   const profile = ranking.find((entry) => entry.driver === state.filters.profileDriver) || ranking[0];
@@ -941,7 +1482,7 @@ function exportSummary() {
     "",
     `- Dataset: ${dataset.title}`,
     `- Imported file: ${dataset.name}`,
-    `- Preset: ${PRESETS[state.filters.preset].label}`,
+    `- Preset: ${activePreset.label}`,
     `- Slice: ${describeCurrentSlice()}`,
     `- Profile driver: ${profile ? profile.driver : "None"}`,
     `- Compared drivers: ${selected}`,
@@ -1043,6 +1584,19 @@ function persistViews() {
     window.localStorage.setItem(STORAGE_KEYS.savedViews, JSON.stringify(state.savedViews));
   } catch (error) {
     console.warn("Could not persist saved views", error);
+  }
+}
+
+function persistCustomPresets() {
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.customPresets, JSON.stringify(state.customPresets));
+  } catch (error) {
+    console.warn("Could not persist custom presets", error);
+    if (error instanceof DOMException && error.name === "QuotaExceededError") {
+      showErrorBanner(
+        "Storage quota exceeded - custom presets will not persist between page loads.",
+      );
+    }
   }
 }
 
@@ -1457,6 +2011,12 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function normalizePresetText(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function truncateLabel(value, maxLength = 16) {
