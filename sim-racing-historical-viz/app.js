@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
 
 // Core UI configuration: compare limits, palette assignment, scoring colors, and preset weights.
 const MAX_COMPARE_DRIVERS = 6;
+const DEFAULT_COMPARE_DRIVERS = ["Josie", "Toby"];
 const DRIVER_PALETTE = [
   "#b7421b",
   "#0b756f",
@@ -196,6 +197,26 @@ function getActiveDataset() {
   return state.datasets.find((dataset) => dataset.id === state.activeDatasetId) || null;
 }
 
+function getDefaultComparisonDrivers(dataset, drivers) {
+  const availableDrivers = (drivers || []).filter(Boolean);
+  if (!availableDrivers.length) {
+    return [];
+  }
+
+  const preferredDrivers = DEFAULT_COMPARE_DRIVERS.filter((driver) => availableDrivers.includes(driver));
+  const rankedFallback = (dataset?.careerRecords || [])
+    .map((record) => record.driver)
+    .filter((driver) => availableDrivers.includes(driver) && !preferredDrivers.includes(driver));
+  const alphabeticalFallback = availableDrivers.filter(
+    (driver) => !preferredDrivers.includes(driver) && !rankedFallback.includes(driver),
+  );
+
+  return [...preferredDrivers, ...rankedFallback, ...alphabeticalFallback].slice(
+    0,
+    Math.min(2, availableDrivers.length),
+  );
+}
+
 function syncSelectionDefaults(dataset, preserveActiveSelection) {
   if (!dataset) {
     state.filters.profileDriver = "";
@@ -225,9 +246,10 @@ function syncSelectionDefaults(dataset, preserveActiveSelection) {
     state.filters.profileDriver = drivers[0];
   }
 
+  const hadSelectionBeforeFiltering = state.selectedDrivers.length > 0;
   state.selectedDrivers = state.selectedDrivers.filter((driver) => drivers.includes(driver)).slice(0, MAX_COMPARE_DRIVERS);
-  if (!state.selectedDrivers.length) {
-    state.selectedDrivers = drivers.slice(0, Math.min(2, drivers.length));
+  if (!state.selectedDrivers.length && (!preserveActiveSelection || hadSelectionBeforeFiltering)) {
+    state.selectedDrivers = getDefaultComparisonDrivers(dataset, drivers);
   }
 }
 
