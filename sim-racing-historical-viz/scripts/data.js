@@ -61,7 +61,7 @@ function parseDataset(name, rawMarkdown, source) {
       seasonLabel: seasonId,
       seasonOrder: getSeasonOrder(seasonId),
       eraLabel: buildEraLabel(seasonId),
-      type: normalizeInlineText(row.Type),
+      type: normalizeDivisionLabel(row.Type),
       car: normalizeInlineText(row.Car),
       venues: splitCsvLike(row.Venues),
       racesPerVenue: parseNumberish(row["Races/Venue"]),
@@ -494,7 +494,7 @@ function parseSeasonMetaBlock(blockLines) {
     const key = match[1].trim().toLowerCase();
     const value = normalizeInlineText(match[2]);
     if (key === "type") {
-      meta.type = value.replace(/\s+season$/i, "");
+      meta.type = normalizeDivisionLabel(value);
     }
     if (key === "car") {
       meta.car = value;
@@ -519,6 +519,17 @@ function parseSeasonMetaBlock(blockLines) {
     /gt3|street/i.test(meta.wdcWinners.map((winner) => winner.label).join(" "));
 
   return meta;
+}
+
+function normalizeDivisionLabel(value) {
+  const clean = normalizeInlineText(value).replace(/\s+season$/i, "").trim();
+  if (/^formula(?:\s+car)?$/i.test(clean)) {
+    return "Formula";
+  }
+  if (/^sports?(?:\s+car)?$/i.test(clean)) {
+    return "Sports";
+  }
+  return clean;
 }
 
 // Expand WCC table rows into driver -> team lookup entries used across several views.
@@ -1093,7 +1104,8 @@ function deriveRate(total, count) {
 }
 
 // All leaderboards and charts start from the same filtered weighted-season record slice.
-function getFilteredSeasonRecords(dataset) {
+function getFilteredSeasonRecords(dataset, options = {}) {
+  const ignoreDivision = Boolean(options.ignoreDivision);
   return dataset.weightedRecords.filter((record) => {
     if (record.isUpcoming) {
       return false;
@@ -1104,7 +1116,7 @@ function getFilteredSeasonRecords(dataset) {
     if (state.filters.era !== "all" && record.eraLabel !== state.filters.era) {
       return false;
     }
-    if (state.filters.division !== "all" && record.type !== state.filters.division) {
+    if (!ignoreDivision && state.filters.division !== "all" && record.type !== state.filters.division) {
       return false;
     }
     if (state.filters.team !== "all" && record.teamName !== state.filters.team) {
@@ -1334,6 +1346,59 @@ function getDriversTopTracks(dataset, drivers, trackAggregateCache, limit) {
       .slice(0, limit != null ? limit : 3);
   });
   return result;
+}
+
+function buildDriverCarSpecBreakdown(dataset, drivers) {
+  const selectedDrivers = (drivers || []).filter(Boolean);
+  const filtered = getFilteredSeasonRecords(dataset, { ignoreDivision: true }).filter((record) =>
+    selectedDrivers.includes(record.driver),
+  );
+  const recordsByDriver = groupBy(filtered, "driver");
+  const specCatalog = [
+    { key: "formula", label: "Formula" },
+    { key: "sports", label: "Sports" },
+  ];
+
+  return selectedDrivers.reduce((accumulator, driver) => {
+    const ordered = sortBySeason(recordsByDriver[driver] || []);
+    const specs = specCatalog.reduce((specAccumulator, spec) => {
+      const rows = ordered.filter((record) => normalizeCarSpec(record.type) === spec.key);
+      if (!rows.length) {
+        specAccumulator[spec.key] = null;
+        return specAccumulator;
+      }
+
+      const peakSeason = [...rows].sort((left, right) => (right.weightedScore || 0) - (left.weightedScore || 0))[0] || null;
+      specAccumulator[spec.key] = {
+        key: spec.key,
+        label: spec.label,
+        seasonsCount: rows.length,
+        avgWs: averageOf(rows, "weightedScore"),
+        peakWs: peakSeason ? peakSeason.weightedScore : null,
+        peakSeasonId: peakSeason ? peakSeason.seasonId : "",
+        avgPointsRate: averageOf(rows, "pointsRate"),
+        avgWinRate: averageOf(rows, "winRate"),
+        totalWdc: rows.filter((record) => record.wdc).length,
+        totalWcc: rows.filter((record) => record.wcc).length,
+      };
+      return specAccumulator;
+    }, {});
+
+    const populatedSpecs = Object.values(specs)
+      .filter(Boolean)
+      .sort((left, right) => (right.avgWs || 0) - (left.avgWs || 0));
+
+    accumulator[driver] = {
+      driver,
+      specs,
+      bestSpec: populatedSpecs[0] || null,
+      edge:
+        populatedSpecs.length > 1
+          ? Number(((populatedSpecs[0].avgWs || 0) - (populatedSpecs[1].avgWs || 0)).toFixed(3))
+          : null,
+    };
+    return accumulator;
+  }, {});
 }
 
 // Season ranking uses the same preset concept, but applies it at a single-season level.
@@ -1586,6 +1651,17 @@ function isNoSliceFilterActive() {
     state.filters.team === "all" &&
     state.filters.car === "all"
   );
+}
+
+function normalizeCarSpec(typeLabel) {
+  const clean = normalizeInlineText(typeLabel).toLowerCase();
+  if (clean.includes("formula")) {
+    return "formula";
+  }
+  if (clean.includes("sports")) {
+    return "sports";
+  }
+  return "";
 }
 
 function normalizeAgainstMax(value, maximum) {
