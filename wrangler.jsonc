@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cup-racing-test-portal",
+  "compatibility_date": "2026-04-05",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "sim-racing-historical-viz"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
