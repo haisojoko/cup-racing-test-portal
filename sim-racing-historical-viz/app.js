@@ -1172,8 +1172,21 @@ function hydrateState() {
   state.activeDatasetId = activeDatasetId || (state.datasets[0] ? state.datasets[0].id : null);
 
   if (!state.datasets.length) {
-    refs["dataset-kicker"].textContent = "No dataset loaded";
-    refs["dataset-title"].textContent = "Upload your Cup Racing Markdown archive or load the demo archive";
+    refs["dataset-kicker"].textContent = "Loading archive…";
+    refs["dataset-title"].textContent = "Fetching the Cup Racing archive…";
+    fetch("https://raw.githubusercontent.com/haisojoko/cup-racing-test-portal/refs/heads/main/sim-racing-historical-viz/data/Cup_Racing_Complete_Data.md")
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then((text) => {
+        importDataset("Cup_Racing_Complete_Data.md", text, "remote");
+      })
+      .catch((err) => {
+        refs["dataset-kicker"].textContent = "No dataset loaded";
+        refs["dataset-title"].textContent = "Upload your Cup Racing Markdown archive or load the demo archive";
+        showErrorBanner(`Could not load remote archive: ${err.message}`);
+      });
   }
 
   syncSelectionDefaults(getActiveDataset());
@@ -2059,4 +2072,8 @@ function hexToAlpha(hex, alpha) {
   const green = Number.parseInt(clean.slice(2, 4), 16);
   const blue = Number.parseInt(clean.slice(4, 6), 16);
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
 }
