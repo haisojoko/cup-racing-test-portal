@@ -1,0 +1,17 @@
+{
+  "name": "Slipstream Archive Lab",
+  "short_name": "Slipstream",
+  "description": "Historical sim racing analysis workspace for Markdown season archives.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2efe8",
+  "theme_color": "#f2efe8",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
