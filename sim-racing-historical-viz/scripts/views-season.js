@@ -153,12 +153,12 @@ function renderSeasonDetail(dataset) {
 
   const standingsColumns = [
     { key: "rankLabel", label: "Pos", strong: true, sticky: true, stickyWidthRem: 3.75 },
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     ...(detail.standings.some((row) => row.className)
-      ? [{ key: "className", label: "Class" }]
+      ? [{ key: "className", label: "Class", className: "wrap-col", widthRem: 8.5 }]
       : []),
     ...(detail.standings.some((row) => row.primaryCar)
-      ? [{ key: "primaryCar", label: "Primary car" }]
+      ? [{ key: "primaryCar", label: "Primary car", className: "wrap-col", widthRem: 11 }]
       : []),
     { key: "points", label: "Points" },
     { key: "wins", label: "Wins" },
@@ -167,7 +167,7 @@ function renderSeasonDetail(dataset) {
     { key: "fastestLaps", label: "FLs" },
     { key: "pointsRate", label: "Pts rate", format: "percent" },
     { key: "top5Rate", label: "Top 5", format: "percent" },
-    { key: "teamName", label: "Team", className: "wrap-col", minWidthRem: 11.5 },
+    { key: "teamName", label: "Team", className: "wrap-col", minWidthRem: 10.5, widthRem: 10.5 },
   ];
 
   const teamColumns = [
@@ -186,6 +186,7 @@ function renderSeasonDetail(dataset) {
       label: "Drivers",
       className: "wrap-col",
       minWidthRem: 13,
+      widthRem: 13,
       render: (row) => row.members.join(", ") || "n/a",
     },
   ];
@@ -643,12 +644,12 @@ function buildTableCard(title, meta, columns, rows, options = {}) {
 // Venue cards render one detailed event table per venue block in the Markdown archive.
 function buildVenueCard(venue) {
   const columns = [
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     ...(venue.rows.some((row) => row.className)
-      ? [{ key: "className", label: "Class" }]
+      ? [{ key: "className", label: "Class", className: "wrap-col", widthRem: 8.5 }]
       : []),
     ...(venue.rows.some((row) => row.carModel)
-      ? [{ key: "carModel", label: "Car" }]
+      ? [{ key: "carModel", label: "Car", className: "wrap-col", widthRem: 11 }]
       : []),
     ...venue.raceColumns.map((race) => ({
       key: `race-${race.number}`,
@@ -740,6 +741,10 @@ function getTableMinWidthRem(columns, options = {}) {
 }
 
 function getColumnWidthRem(column, compact) {
+  if (typeof column.widthRem === "number") {
+    return column.widthRem;
+  }
+
   if (typeof column.minWidthRem === "number") {
     return column.minWidthRem;
   }
@@ -814,6 +819,7 @@ function buildTableCellAttributes(column, options = {}) {
   if (column.isStickyBoundary) {
     classNames.push("is-sticky-boundary");
   }
+  const combinedClassName = classNames.join(" ");
 
   const styleParts = [];
   if (column.sticky) {
@@ -821,6 +827,19 @@ function buildTableCellAttributes(column, options = {}) {
     styleParts.push(`min-width:${column.stickyWidthRem}rem`);
     styleParts.push(`width:${column.stickyWidthRem}rem`);
     styleParts.push(`max-width:${column.stickyWidthRem}rem`);
+  } else {
+    if (typeof column.minWidthRem === "number") {
+      styleParts.push(`min-width:${column.minWidthRem}rem`);
+    }
+    if (typeof column.widthRem === "number") {
+      styleParts.push(`width:${column.widthRem}rem`);
+      if (typeof column.maxWidthRem !== "number" && combinedClassName.includes("wrap-col")) {
+        styleParts.push(`max-width:${column.widthRem}rem`);
+      }
+    }
+    if (typeof column.maxWidthRem === "number") {
+      styleParts.push(`max-width:${column.maxWidthRem}rem`);
+    }
   }
 
   return `${classNames.length ? ` class="${classNames.join(" ")}"` : ""}${styleParts.length ? ` style="${styleParts.join(";")}"` : ""}`;
