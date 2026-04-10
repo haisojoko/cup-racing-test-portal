@@ -27,7 +27,7 @@
     </noscript>
 
     <div class="app-shell">
-      <!-- Hero / top-level actions for demo loading and export utilities. -->
+      <!-- Hero / top-level actions for export utilities. -->
       <header class="hero panel">
         <div class="hero__copy">
           <p class="hero__eyebrow">Historical Sim Racing Intelligence</p>
@@ -38,12 +38,6 @@
           </p>
         </div>
         <div class="hero__actions">
-          <button class="button button--secondary" id="load-sample" type="button">
-            Load Demo Archive
-          </button>
-          <button class="button" id="export-summary" type="button">
-            Export Summary
-          </button>
           <button class="button" id="export-chart" type="button">
             Export Active Chart
           </button>
@@ -60,7 +54,18 @@
           <section class="panel">
             <div class="section-heading">
               <h2>Dataset Intake</h2>
-              <span class="badge badge--accent">Markdown First</span>
+              <div class="section-heading__actions">
+                <button
+                  class="mini-button"
+                  id="markdown-paste-toggle"
+                  type="button"
+                  aria-expanded="true"
+                  title="Minimize the League Index box"
+                >
+                  Minimize League Index
+                </button>
+                <span class="badge badge--accent">Markdown First</span>
+              </div>
             </div>
 
             <label class="input-label" for="dataset-upload">Upload season files</label>
@@ -72,21 +77,25 @@
               multiple
             />
 
-            <label class="input-label" for="markdown-paste">Paste raw Markdown</label>
-            <textarea
-              id="markdown-paste"
-              class="textarea"
-              rows="9"
-              placeholder="Paste a season archive here. Use the demo format as your template."
-            ></textarea>
+            <div class="input-label-row">
+              <label class="input-label" for="markdown-paste">League Index Markdown</label>
+            </div>
+            <div id="markdown-paste-panel" class="collapsible-field">
+              <textarea
+                id="markdown-paste"
+                class="textarea"
+                rows="9"
+                placeholder="Paste a league index or season archive here."
+              ></textarea>
 
-            <div class="stack-inline">
-              <button class="button button--secondary" id="import-pasted" type="button">
-                Import Pasted Markdown
-              </button>
-              <button class="button button--ghost" id="clear-pasted" type="button">
-                Clear
-              </button>
+              <div class="stack-inline">
+                <button class="button button--secondary" id="import-pasted" type="button">
+                  Import Pasted Markdown
+                </button>
+                <button class="button button--ghost" id="clear-pasted" type="button">
+                  Clear
+                </button>
+              </div>
             </div>
 
             <div class="schema-note">
@@ -135,7 +144,7 @@
                 <span>Division</span>
                 <select id="division-select"></select>
               </label>
-              <label class="field">
+              <label class="field" id="team-filter-field">
                 <span>Team</span>
                 <select id="team-select"></select>
               </label>
@@ -143,27 +152,27 @@
                 <span>Car</span>
                 <select id="car-select"></select>
               </label>
-              <label class="field">
+              <label class="field" id="profile-driver-field">
                 <span>Profile Driver</span>
                 <select id="profile-driver-select"></select>
               </label>
-              <label class="field">
+              <label class="field" id="driver-search-field">
                 <span>Driver Search</span>
                 <input id="driver-search" type="search" placeholder="Search driver names" />
               </label>
             </div>
 
-            <div class="preset-lab-block">
+            <div class="preset-lab-block" id="preset-lab-block">
               <div class="picker-block__title">Custom Preset Lab</div>
               <div id="preset-lab" class="preset-lab"></div>
             </div>
 
-            <div class="picker-block">
+            <div class="picker-block" id="driver-picker-block">
               <div class="picker-block__title">Comparison drivers</div>
               <div id="driver-picker" class="driver-picker"></div>
             </div>
 
-            <div class="stack-inline">
+            <div class="stack-inline" id="driver-actions-block">
               <button class="button button--secondary" id="save-view" type="button">
                 Save Current View
               </button>
@@ -172,7 +181,7 @@
               </button>
             </div>
 
-            <div class="saved-view-block">
+            <div class="saved-view-block" id="saved-views-block">
               <div class="picker-block__title">Saved comparisons</div>
               <div id="saved-views" class="saved-views"></div>
             </div>
@@ -186,13 +195,26 @@
             <div class="section-heading">
               <div>
                 <p class="section-kicker" id="dataset-kicker">No dataset loaded</p>
-                <h2 id="dataset-title">Upload or load a Markdown archive to begin</h2>
+                <h2 id="dataset-title">Upload a Markdown archive to begin</h2>
               </div>
-              <span class="badge badge--accent" id="dataset-status-badge">Idle</span>
+              <div class="section-heading__actions">
+                <button
+                  class="mini-button"
+                  id="dataset-summary-toggle"
+                  type="button"
+                  aria-expanded="true"
+                  title="Minimize the league summary panel"
+                >
+                  Minimize League Summary
+                </button>
+                <span class="badge badge--accent" id="dataset-status-badge">Idle</span>
+              </div>
             </div>
 
-            <div id="overview-cards" class="overview-cards"></div>
-            <div id="validation-summary" class="validation-summary"></div>
+            <div id="dataset-summary-body" class="collapsible-section">
+              <div id="overview-cards" class="overview-cards"></div>
+              <div id="validation-summary" class="validation-summary"></div>
+            </div>
           </section>
 
           <!-- Top-level tabs split season drill-down, single-driver profile work, multi-driver comparison, archive-wide rankings, and broader statistical insights. -->
@@ -206,6 +228,9 @@
               </button>
               <button class="tab-button" type="button" data-tab="comparison" role="tab" aria-selected="false">
                 Driver Comparison
+              </button>
+              <button class="tab-button" type="button" data-tab="teams" role="tab" aria-selected="false">
+                Teams
               </button>
               <button class="tab-button" type="button" data-tab="greats" role="tab" aria-selected="false">
                 Great Seasons & Careers
@@ -330,6 +355,24 @@
             </section>
           </section>
 
+          <!-- Teams tab: team totals, profile, comparison workspace, and WCC history. -->
+          <section class="tab-panel" data-tab-panel="teams" hidden>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Teams</p>
+                  <h2>Constructors, rosters, and championship arcs</h2>
+                </div>
+                <span class="badge badge--accent" id="teams-badge">Team totals</span>
+              </div>
+              <div id="teams-toolbar" class="teams-toolbar"></div>
+            </section>
+
+            <section class="panel">
+              <div id="teams-content" class="teams-shell"></div>
+            </section>
+          </section>
+
           <!-- Greats tab: archive-wide rankings only. -->
           <section class="tab-panel" data-tab-panel="greats" hidden>
             <section class="panel">
@@ -418,6 +461,7 @@
     <script src="scripts/data.js"></script>
     <script src="scripts/views-season.js"></script>
     <script src="scripts/views-analysis.js"></script>
+    <script src="scripts/views-teams.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -206,6 +206,18 @@ textarea {
   margin-bottom: 1rem;
 }
 
+.section-heading__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.section-heading__actions .mini-button {
+  white-space: nowrap;
+}
+
 /* Reusable UI atoms: badges, buttons, inputs, and inline field wrappers. */
 .badge {
   display: inline-flex;
@@ -293,6 +305,18 @@ textarea:focus-visible {
   letter-spacing: 0.08em;
 }
 
+.input-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  margin-bottom: 0.45rem;
+}
+
+.input-label-row .input-label {
+  margin-bottom: 0;
+}
+
 .file-input,
 .textarea,
 select,
@@ -309,6 +333,22 @@ input[type="text"] {
 .textarea {
   resize: vertical;
   min-height: 10.5rem;
+}
+
+.collapsible-field {
+  display: grid;
+}
+
+.collapsible-field[hidden] {
+  display: none;
+}
+
+.collapsible-section {
+  display: grid;
+}
+
+.collapsible-section[hidden] {
+  display: none;
 }
 
 .stack-inline {
@@ -691,10 +731,66 @@ input[type="text"] {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
 }
 
+.teams-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: end;
+}
+
+.teams-toolbar__field {
+  flex: 1 1 16rem;
+  min-width: min(18rem, 100%);
+}
+
+.teams-toolbar__note {
+  flex: 1 1 14rem;
+  max-width: 34rem;
+}
+
+.subtab-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.subtab-button {
+  border: 1px solid rgba(91, 66, 48, 0.12);
+  border-radius: 999px;
+  padding: 0.68rem 0.9rem;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.subtab-button:hover,
+.subtab-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(11, 117, 111, 0.24);
+}
+
+.subtab-button.is-active {
+  color: var(--teal);
+  background: linear-gradient(135deg, rgba(11, 117, 111, 0.14), rgba(248, 255, 253, 0.94));
+  border-color: rgba(11, 117, 111, 0.3);
+}
+
+.teams-shell {
+  display: grid;
+  gap: 0.9rem;
+}
+
 /* Tab-specific overrides widen dense profile, comparison, and leaderboard surfaces. */
 [data-tab-panel="profile"] .content-grid,
 [data-tab-panel="comparison"] .content-grid,
-[data-tab-panel="greats"] .content-grid {
+[data-tab-panel="greats"] .content-grid,
+[data-tab-panel="teams"] .content-grid {
   grid-template-columns: 1fr;
 }
 
@@ -704,6 +800,8 @@ input[type="text"] {
 [data-tab-panel="comparison"] .profile-shell,
 [data-tab-panel="comparison"] .comparison-shell,
 [data-tab-panel="comparison"] .changes-shell,
+[data-tab-panel="teams"] .profile-shell,
+[data-tab-panel="teams"] .comparison-shell,
 [data-tab-panel="greats"] .fingerprint-grid {
   grid-template-columns: 1fr;
 }
@@ -839,6 +937,11 @@ input[type="text"] {
   align-items: flex-start;
 }
 
+.validation-item__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .validation-item__status {
   min-width: 6.25rem;
   font-size: 0.76rem;
@@ -853,6 +956,24 @@ input[type="text"] {
 
 .validation-item__status.is-info {
   color: var(--teal);
+}
+
+.validation-item__dismiss {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 0.05rem 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.validation-item__dismiss:hover,
+.validation-item__dismiss:focus-visible {
+  color: var(--accent);
 }
 
 .content-grid {
@@ -1103,18 +1224,27 @@ input[type="text"] {
 }
 
 .table-wrap {
+  display: block;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
+  touch-action: auto;
   overscroll-behavior-x: contain;
   border-radius: var(--radius-md);
   border: 1px solid rgba(91, 66, 48, 0.08);
 }
 
 .data-table {
+  --table-min-width-rem: 44;
+  display: table;
   width: max-content;
-  min-width: max(100%, 44rem);
+  min-width: max(100%, calc(var(--table-min-width-rem) * 1rem));
+  max-width: none;
   border-collapse: collapse;
+  table-layout: auto;
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -1125,6 +1255,7 @@ input[type="text"] {
   border-bottom: 1px solid rgba(91, 66, 48, 0.08);
   font-size: 0.9rem;
   vertical-align: top;
+  white-space: nowrap;
 }
 
 .data-table th {
@@ -1143,7 +1274,14 @@ input[type="text"] {
   position: sticky;
   left: 0;
   background-clip: padding-box;
+  overflow-wrap: normal;
+}
+
+.data-table th.wrap-col,
+.data-table td.wrap-col {
+  white-space: normal;
   overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .data-table th.is-sticky-col {
@@ -1451,6 +1589,19 @@ input[type="text"] {
   font-weight: 700;
 }
 
+.pill--button {
+  border: 0;
+  cursor: pointer;
+}
+
+.team-picker {
+  max-height: none;
+}
+
+.team-compare-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .changes-shell {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -1518,7 +1669,7 @@ input[type="text"] {
 }
 
 .data-table--compact {
-  min-width: max(100%, 30rem);
+  --table-min-width-rem: 34;
 }
 
 .num-col {
@@ -1583,7 +1734,8 @@ input[type="text"] {
   .fingerprint-grid,
   .changes-shell,
   .season-class-grid,
-  .season-detail-shell {
+  .season-detail-shell,
+  .team-compare-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1603,7 +1755,8 @@ input[type="text"] {
   .filter-grid,
   .driver-picker,
   .overview-cards,
-  .tab-nav {
+  .tab-nav,
+  .subtab-nav {
     grid-template-columns: 1fr;
   }
 
@@ -1611,8 +1764,23 @@ input[type="text"] {
     display: grid;
   }
 
+  .subtab-nav {
+    display: grid;
+    width: 100%;
+  }
+
   .tab-button {
     width: 100%;
+  }
+
+  .subtab-button,
+  .teams-toolbar__field {
+    width: 100%;
+  }
+
+  .input-label-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .spec-split-grid {
@@ -1646,10 +1814,6 @@ input[type="text"] {
     border-radius: calc(var(--radius-md) - 2px);
   }
 
-  .data-table {
-    min-width: max(100%, 36rem);
-  }
-
   .data-table th,
   .data-table td {
     padding: 0.55rem 0.65rem;
@@ -1659,10 +1823,6 @@ input[type="text"] {
   .data-table th {
     font-size: 0.72rem;
     letter-spacing: 0.05em;
-  }
-
-  .data-table--compact {
-    min-width: max(100%, 28rem);
   }
 
   .preset-lab__summary {

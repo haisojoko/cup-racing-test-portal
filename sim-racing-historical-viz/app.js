@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
 
 // Core UI configuration: compare limits, palette assignment, scoring colors, and preset weights.
 const MAX_COMPARE_DRIVERS = 6;
+const MAX_COMPARE_TEAMS = 4;
 const DEFAULT_COMPARE_DRIVERS = ["Josie", "Toby"];
 const DRIVER_PALETTE = [
   "#b7421b",
@@ -43,6 +44,12 @@ const METRIC_COLORS = {
   weightedScore: "#b7421b",
   pointsRate: "#0b756f",
   top5Rate: "#415e97",
+  totalWcc: "#b7421b",
+  totalPoints: "#0b756f",
+  totalWins: "#b28a28",
+  avgTeamWeightedScore: "#415e97",
+  peakTeamWeightedScore: "#8a2d2d",
+  totalWdc: "#5c3d2e",
 };
 
 const CAREER_PRESET_METRICS = [
@@ -180,10 +187,13 @@ const state = {
   datasets: [],
   activeDatasetId: null,
   activeTab: "season-detail",
+  datasetSummaryCollapsed: false,
   filters: getDefaultFilters(),
+  teams: getDefaultTeamsState(),
   insights: getDefaultInsightsFilters(),
   selectedDrivers: [],
   savedViews: [],
+  dismissedValidationKeys: {},
   customPresets: {},
   presetLab: getDefaultPresetLabState(),
   driverColors: {},
@@ -201,7 +211,7 @@ function getDefaultPresetLabState() {
     sourcePresetId: "balanced",
     customPresetId: "",
     dirty: false,
-    collapsed: false,
+    collapsed: true,
   };
 }
 
@@ -217,6 +227,16 @@ function getDefaultFilters() {
     detailProgressMode: "week",
     profileDriver: "",
     driverSearch: "",
+  };
+}
+
+function getDefaultTeamsState() {
+  return {
+    view: "totals",
+    search: "",
+    profileTeam: "",
+    selectedTeams: [],
+    compareInitialized: false,
   };
 }
 
@@ -340,6 +360,22 @@ function toggleComparisonDriver(driver) {
   state.selectedDrivers = [...state.selectedDrivers, clean].slice(-MAX_COMPARE_DRIVERS);
 }
 
+function toggleComparisonTeam(teamName) {
+  const clean = normalizeInlineText(teamName);
+  if (!clean) {
+    return;
+  }
+
+  state.teams.compareInitialized = true;
+
+  if (state.teams.selectedTeams.includes(clean)) {
+    state.teams.selectedTeams = state.teams.selectedTeams.filter((entry) => entry !== clean);
+    return;
+  }
+
+  state.teams.selectedTeams = [...state.teams.selectedTeams, clean].slice(-MAX_COMPARE_TEAMS);
+}
+
 // Boot sequence: cache DOM, seed UI selects, wire events, restore saved state, then render.
 function init() {
   cacheRefs();
@@ -354,12 +390,12 @@ function init() {
 // Cache every DOM node that the renderer writes to or the event layer listens to.
 function cacheRefs() {
   [
-    "load-sample",
-    "export-summary",
     "export-chart",
     "export-json",
     "dataset-upload",
     "markdown-paste",
+    "markdown-paste-panel",
+    "markdown-paste-toggle",
     "import-pasted",
     "clear-pasted",
     "global-filters-panel",
@@ -372,18 +408,27 @@ function cacheRefs() {
     "era-select",
     "division-select",
     "team-select",
+    "team-filter-field",
     "car-select",
     "detail-season-select",
     "detail-progress-mode-select",
     "profile-driver-select",
+    "profile-driver-field",
     "view-tabs",
     "driver-search",
+    "driver-search-field",
     "driver-picker",
+    "driver-picker-block",
     "save-view",
     "reset-filters",
+    "driver-actions-block",
     "saved-views",
+    "saved-views-block",
+    "preset-lab-block",
     "dataset-kicker",
     "dataset-title",
+    "dataset-summary-toggle",
+    "dataset-summary-body",
     "dataset-status-badge",
     "overview-cards",
     "validation-summary",
@@ -415,6 +460,9 @@ function cacheRefs() {
     "track-performance",
     "track-perf-badge",
     "comparison-top-tracks",
+    "teams-badge",
+    "teams-toolbar",
+    "teams-content",
   ].forEach((id) => {
     refs[id] = document.getElementById(id);
   });
@@ -814,6 +862,63 @@ function sanitizePresetLabInput(value) {
   return Number(numeric.toFixed(1));
 }
 
+function applyMarkdownPasteCollapseState() {
+  const panel = refs["markdown-paste-panel"];
+  const button = refs["markdown-paste-toggle"];
+  if (!panel || !button) {
+    return;
+  }
+
+  const isCollapsed = Boolean(panel.hidden);
+  button.textContent = isCollapsed ? "Expand League Index" : "Minimize League Index";
+  button.setAttribute("aria-expanded", String(!isCollapsed));
+  button.title = isCollapsed ? "Expand the League Index box" : "Minimize the League Index box";
+}
+
+function applyDatasetSummaryCollapseState() {
+  const body = refs["dataset-summary-body"];
+  const button = refs["dataset-summary-toggle"];
+  if (!body || !button) {
+    return;
+  }
+
+  const isCollapsed = Boolean(state.datasetSummaryCollapsed);
+  body.hidden = isCollapsed;
+  button.textContent = isCollapsed ? "Expand League Summary" : "Minimize League Summary";
+  button.setAttribute("aria-expanded", String(!isCollapsed));
+  button.title = isCollapsed
+    ? "Expand the league summary panel"
+    : "Minimize the league summary panel";
+}
+
+function buildValidationDismissKey(entry) {
+  return `${entry.level || ""}::${entry.title || ""}::${entry.detail || ""}`;
+}
+
+function isValidationDismissed(datasetId, entry) {
+  if (!datasetId || !entry) {
+    return false;
+  }
+  return Boolean(state.dismissedValidationKeys[datasetId]?.includes(buildValidationDismissKey(entry)));
+}
+
+function dismissValidationEntry(datasetId, entry) {
+  if (!datasetId || !entry) {
+    return;
+  }
+
+  const key = buildValidationDismissKey(entry);
+  const existing = state.dismissedValidationKeys[datasetId] || [];
+  if (existing.includes(key)) {
+    return;
+  }
+
+  state.dismissedValidationKeys = {
+    ...state.dismissedValidationKeys,
+    [datasetId]: [...existing, key],
+  };
+}
+
 function formatPresetLabPercentage(value) {
   return Number((Number(value) || 0).toFixed(1)).toString();
 }
@@ -871,9 +976,17 @@ function normalizeCustomPresets(rawPresets) {
 
 // All user interactions funnel through this event layer, then trigger centralized renders.
 function bindEvents() {
-  refs["load-sample"].addEventListener("click", () => {
-    importDataset("Slipstream_Demo_Archive.md", DEMO_MARKDOWN, "demo");
+  refs["markdown-paste-toggle"].addEventListener("click", () => {
+    refs["markdown-paste-panel"].hidden = !refs["markdown-paste-panel"].hidden;
+    applyMarkdownPasteCollapseState();
   });
+  applyMarkdownPasteCollapseState();
+
+  refs["dataset-summary-toggle"].addEventListener("click", () => {
+    state.datasetSummaryCollapsed = !state.datasetSummaryCollapsed;
+    applyDatasetSummaryCollapseState();
+  });
+  applyDatasetSummaryCollapseState();
 
   refs["dataset-upload"].addEventListener("change", async (event) => {
     const files = Array.from(event.target.files || []);
@@ -986,6 +1099,11 @@ function bindEvents() {
     renderTabState();
   });
 
+  refs["teams-toolbar"].addEventListener("click", handleTeamsToolbarClick);
+  refs["teams-toolbar"].addEventListener("change", handleTeamsToolbarChange);
+  refs["teams-toolbar"].addEventListener("input", handleTeamsToolbarInput);
+  refs["teams-content"].addEventListener("click", handleTeamsContentClick);
+
   refs["driver-search"].addEventListener("input", (event) => {
     state.filters.driverSearch = event.target.value;
     renderDriverPicker();
@@ -1007,8 +1125,10 @@ function bindEvents() {
 
   refs["reset-filters"].addEventListener("click", () => {
     const preset = getValidPresetId(state.filters.preset);
+    const activeTeamView = state.teams.view;
     state.filters = getDefaultFilters();
     state.filters.preset = preset;
+    state.teams = { ...getDefaultTeamsState(), view: activeTeamView };
     state.selectedDrivers = [];
     syncSelectionDefaults(getActiveDataset());
     if (!state.presetLab.dirty) {
@@ -1049,6 +1169,7 @@ function bindEvents() {
     const datasetId = button.dataset.datasetId;
     if (button.dataset.action === "activate") {
       state.activeDatasetId = datasetId;
+      state.teams = { ...getDefaultTeamsState(), view: state.teams.view };
       syncSelectionDefaults(getActiveDataset(), true);
       persistDatasets();
       render();
@@ -1062,6 +1183,7 @@ function bindEvents() {
         state.activeDatasetId = state.datasets[0] ? state.datasets[0].id : null;
         state.selectedDrivers = [];
         state.filters = getDefaultFilters();
+        state.teams = { ...getDefaultTeamsState(), view: state.teams.view };
       }
 
       persistDatasets();
@@ -1088,6 +1210,7 @@ function bindEvents() {
       state.activeDatasetId = view.datasetId;
       state.filters = { ...getDefaultFilters(), ...view.filters };
       state.filters.preset = getValidPresetId(state.filters.preset);
+      state.teams = { ...getDefaultTeamsState(), view: state.teams.view };
       state.selectedDrivers = [...view.selectedDrivers];
       syncSelectionDefaults(getActiveDataset(), true);
       if (!state.presetLab.dirty) {
@@ -1116,7 +1239,27 @@ function bindEvents() {
     renderAnalysisView();
   });
 
-  refs["export-summary"].addEventListener("click", exportSummary);
+  refs["validation-summary"].addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-dismiss-validation]");
+    if (!button) {
+      return;
+    }
+
+    const dataset = getActiveDataset();
+    if (!dataset) {
+      return;
+    }
+
+    const index = Number(button.dataset.validationIndex);
+    const entry = dataset.validations[index];
+    if (!entry || entry.level !== "info") {
+      return;
+    }
+
+    dismissValidationEntry(dataset.id, entry);
+    renderOverview(dataset);
+  });
+
   refs["export-chart"].addEventListener("click", exportCareerChart);
   refs["export-json"].addEventListener("click", exportDatasetJson);
 
@@ -1140,6 +1283,93 @@ function bindEvents() {
       closeDriverColorPicker();
     }
   });
+}
+
+function renderTeamsOnly(options = {}) {
+  renderTabState();
+  const dataset = getActiveDataset();
+  if (!dataset) {
+    refs["teams-badge"].textContent = "Team totals";
+    refs["teams-toolbar"].innerHTML = "";
+    refs["teams-content"].innerHTML = renderEmptyStateMarkup(
+      "Load a dataset to explore team totals, profiles, comparisons, and WCC history.",
+    );
+    syncExportButtons();
+    return;
+  }
+
+  if (options.toolbar === false) {
+    renderTeamsContent(dataset);
+  } else {
+    renderTeamsTab(dataset);
+  }
+  syncExportButtons();
+}
+
+function handleTeamsToolbarClick(event) {
+  const button = event.target.closest("button[data-team-view]");
+  if (!button) {
+    return;
+  }
+
+  state.teams.view = button.dataset.teamView || "totals";
+  renderTeamsOnly();
+}
+
+function handleTeamsToolbarChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  if (target.id === "team-profile-select") {
+    state.teams.profileTeam = target.value;
+    renderTeamsOnly({ toolbar: false });
+  }
+}
+
+function handleTeamsToolbarInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+
+  if (target.id === "team-search-input") {
+    state.teams.search = target.value;
+    renderTeamsOnly({ toolbar: false });
+  }
+}
+
+function handleTeamsContentClick(event) {
+  const button = event.target.closest("button[data-team-action], button[data-team-toggle]");
+  if (!button) {
+    return;
+  }
+
+  if (button.dataset.teamToggle) {
+    toggleComparisonTeam(button.dataset.teamToggle);
+    renderTeamsOnly({ toolbar: false });
+    return;
+  }
+
+  const action = button.dataset.teamAction;
+  if (action === "clear-compare") {
+    state.teams.selectedTeams = [];
+    renderTeamsOnly({ toolbar: false });
+    return;
+  }
+
+  if (action === "view-profile" && button.dataset.teamName) {
+    state.teams.profileTeam = button.dataset.teamName;
+    state.teams.view = "profile";
+    renderTeamsOnly();
+    return;
+  }
+
+  if (action === "view-history") {
+    state.teams.view = "history";
+    renderTeamsOnly();
+  }
 }
 
 // Restore persisted datasets/views from localStorage and rebuild parsed dataset objects.
@@ -1184,7 +1414,7 @@ function hydrateState() {
       })
       .catch((err) => {
         refs["dataset-kicker"].textContent = "No dataset loaded";
-        refs["dataset-title"].textContent = "Upload your Cup Racing Markdown archive or load the demo archive";
+        refs["dataset-title"].textContent = "Upload your Cup Racing Markdown archive to begin";
         showErrorBanner(`Could not load remote archive: ${err.message}`);
       });
   }
@@ -1211,6 +1441,7 @@ function importDataset(name, rawMarkdown, source) {
 
     state.activeDatasetId = dataset.id;
     state.filters = { ...getDefaultFilters(), preset: getValidPresetId(state.filters.preset) };
+    state.teams = { ...getDefaultTeamsState(), view: state.teams.view };
     state.selectedDrivers = [];
     syncSelectionDefaults(dataset);
     state.trackAggregateCache[dataset.id] = buildTrackAggregates(dataset);
@@ -1225,7 +1456,7 @@ function importDataset(name, rawMarkdown, source) {
 function syncExportButtons() {
   const hasDataset = Boolean(getActiveDataset());
   const noDatasetTitle = "Load a dataset first before exporting.";
-  ["export-summary", "export-json"].forEach((id) => {
+  ["export-json"].forEach((id) => {
     refs[id].disabled = !hasDataset;
     refs[id].title = hasDataset ? "" : noDatasetTitle;
   });
@@ -1282,7 +1513,7 @@ function renderAnalysisPanels(dataset) {
   renderWhatChanged(dataset);
   renderTrackPerformance(dataset);
   renderComparisonTopTracks(dataset);
-  refs["selection-badge"].textContent = `${state.selectedDrivers.length} drivers selected`;
+  renderTeamsTab(dataset);
   refs["dataset-count-badge"].textContent = `${state.datasets.length} loaded`;
   syncExportButtons();
 }
@@ -1291,7 +1522,6 @@ function renderAnalysisPanels(dataset) {
 function renderEmptyWorkspace() {
   renderTabState();
   refs["dataset-count-badge"].textContent = `${state.datasets.length} loaded`;
-  refs["selection-badge"].textContent = "0 drivers selected";
   refs["dataset-status-badge"].textContent = "Idle";
   refs["overview-cards"].innerHTML = renderEmptyStateMarkup(
     "Load a Markdown archive to populate the analyst workspace.",
@@ -1349,6 +1579,11 @@ function renderEmptyWorkspace() {
   refs["comparison-top-tracks"].innerHTML = renderEmptyStateMarkup(
     "Select drivers to compare their strongest tracks.",
   );
+  refs["teams-badge"].textContent = "Team totals";
+  refs["teams-toolbar"].innerHTML = "";
+  refs["teams-content"].innerHTML = renderEmptyStateMarkup(
+    "Load a dataset to explore team totals, profiles, comparisons, and WCC history.",
+  );
   refs["driver-picker"].innerHTML = renderEmptyStateMarkup(
     "Upload a dataset to browse drivers.",
   );
@@ -1398,9 +1633,44 @@ function renderTabState() {
     panel.hidden = panel.dataset.tabPanel !== state.activeTab;
   });
 
-  // The insights tab uses its own local controls, so the sidebar filter panel steps aside while it is active.
+  syncSidebarMode();
+}
+
+function syncSidebarMode() {
+  const isInsightsTab = state.activeTab === "insights";
+  const isTeamsTab = state.activeTab === "teams";
+
   if (refs["global-filters-panel"]) {
-    refs["global-filters-panel"].hidden = state.activeTab === "insights";
+    refs["global-filters-panel"].hidden = isInsightsTab;
+  }
+
+  if (refs["preset-lab-block"]) {
+    refs["preset-lab-block"].hidden = isTeamsTab;
+  }
+  if (refs["team-filter-field"]) {
+    refs["team-filter-field"].hidden = isTeamsTab;
+  }
+  if (refs["profile-driver-field"]) {
+    refs["profile-driver-field"].hidden = isTeamsTab;
+  }
+  if (refs["driver-search-field"]) {
+    refs["driver-search-field"].hidden = isTeamsTab;
+  }
+  if (refs["driver-picker-block"]) {
+    refs["driver-picker-block"].hidden = isTeamsTab;
+  }
+  if (refs["save-view"]) {
+    refs["save-view"].hidden = isTeamsTab;
+  }
+  if (refs["saved-views-block"]) {
+    refs["saved-views-block"].hidden = isTeamsTab;
+  }
+  if (refs["selection-badge"]) {
+    refs["selection-badge"].textContent = isTeamsTab
+      ? state.teams.view === "compare"
+        ? `${state.teams.selectedTeams.length} teams selected`
+        : "Teams mode"
+      : `${state.selectedDrivers.length} drivers selected`;
   }
 }
 
@@ -1476,48 +1746,6 @@ function populateSelect(element, options, defaultLabel, selectedValue, defaultVa
     "profile-driver-select": "profileDriver",
   };
   state.filters[stateKeyMap[element.id]] = nextValue || defaultValue;
-}
-
-function exportSummary() {
-  const dataset = getActiveDataset();
-  if (!dataset) {
-    showErrorBanner("Load a dataset before exporting a summary.");
-    return;
-  }
-
-  const activePreset = getActivePreset();
-  const ranking = buildCareerAggregates(dataset);
-  const seasonRanking = buildSeasonRanking(dataset);
-  const profile = ranking.find((entry) => entry.driver === state.filters.profileDriver) || ranking[0];
-  const selected = state.selectedDrivers.join(", ") || "None";
-  const lines = [
-    "# Slipstream Archive Summary",
-    "",
-    `- Dataset: ${dataset.title}`,
-    `- Imported file: ${dataset.name}`,
-    `- Preset: ${activePreset.label}`,
-    `- Slice: ${describeCurrentSlice()}`,
-    `- Profile driver: ${profile ? profile.driver : "None"}`,
-    `- Compared drivers: ${selected}`,
-    "",
-    "## Career Top 5",
-    ...ranking.slice(0, 5).map(
-      (entry, index) =>
-        `${index + 1}. ${entry.driver} - score ${formatComposite(entry.composite)}, CPI ${formatDecimal(entry.cpi)}, peak ${formatDecimal(entry.peakWs)}`,
-    ),
-    "",
-    "## Season Top 5",
-    ...seasonRanking.slice(0, 5).map(
-      (entry, index) =>
-        `${index + 1}. ${entry.driver} ${entry.seasonId} - score ${formatComposite(entry.composite)}, WS ${formatDecimal(entry.weightedScore)}, points rate ${formatPercent(entry.pointsRate)}`,
-    ),
-  ];
-
-  if (profile) {
-    lines.push("", "## Profile Narrative", buildDriverNarrative(profile, describeCurrentSlice()));
-  }
-
-  downloadTextFile(`slipstream-summary-${slugify(dataset.title)}.md`, lines.join("\n"));
 }
 
 function exportCareerChart() {
@@ -1957,6 +2185,12 @@ function metricLabel(key) {
     weightedScore: "Weighted score",
     pointsRate: "Points rate",
     top5Rate: "Top 5 rate",
+    totalWcc: "WCC titles",
+    totalPoints: "Total points",
+    totalWins: "Total wins",
+    avgTeamWeightedScore: "Average team weighted score",
+    peakTeamWeightedScore: "Peak team weighted score",
+    totalWdc: "WDC seasons",
   };
 
   return labels[key] || key;
@@ -1993,8 +2227,11 @@ function formatMetricValue(key, value) {
   if (["avgPtsRate", "avgTop5Rate", "avgWinRate", "avgPodiumRate", "avgFastestLapRate", "avgPoleRate", "participation", "winRate", "podiumRate", "fastestLapRate", "poleRate", "pointsRate", "top5Rate"].includes(key)) {
     return formatPercent(value);
   }
-  if (["avgWs", "peakWs", "weightedScore", "cpi"].includes(key)) {
+  if (["avgWs", "peakWs", "weightedScore", "cpi", "avgTeamWeightedScore", "peakTeamWeightedScore"].includes(key)) {
     return formatDecimal(value);
+  }
+  if (["totalWcc", "totalPoints", "totalWins", "totalWdc"].includes(key)) {
+    return formatInteger(value);
   }
   if (key === "titles") {
     return formatDecimal(value, 2);
@@ -2075,5 +2312,8 @@ function hexToAlpha(hex, alpha) {
 }
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js");
+  navigator.serviceWorker
+    .register("sw.js", { updateViaCache: "none" })
+    .then((registration) => registration.update())
+    .catch(() => {});
 }
