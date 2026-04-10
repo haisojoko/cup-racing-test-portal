@@ -499,7 +499,7 @@ function renderInsightExplorer(activeCard) {
 // Season columns pivot between weighted, totals, pace, results, and efficiency without changing the underlying ranked rows.
 function buildSeasonInsightColumns(view) {
   const baseColumns = [
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     { key: "seasonId", label: "Season", strong: true },
   ];
 
@@ -560,11 +560,13 @@ function buildSeasonInsightColumns(view) {
 
 function buildTrackTyrantColumns(view) {
   const baseColumns = [
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     {
       key: "signatureTrack",
       label: "Signature track",
       strong: true,
+      className: "wrap-col",
+      widthRem: 10.5,
       render: (row) => row.signatureTrack?.track || "n/a",
     },
   ];
@@ -642,7 +644,7 @@ function buildTrackTyrantColumns(view) {
 // Career columns expose the same grouped rows through different metric families without changing which career slices are ranked.
 function buildCareerInsightColumns(view) {
   const baseColumns = [
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     { key: "seasonsCount", label: "Seasons" },
   ];
 
@@ -1033,6 +1035,7 @@ function renderTrackPerformance(dataset) {
       label: "Track",
       sticky: true,
       stickyWidthRem: 11.5,
+      className: "wrap-col",
     },
     { key: "starts", label: "Starts", className: "num-col" },
     { key: "wins", label: "Wins", className: "num-col" },
@@ -1102,7 +1105,7 @@ function renderComparisonTopTracks(dataset) {
 
   const topTracksByDriver = getDriversTopTracks(dataset, state.selectedDrivers, cache, 3);
   const comparisonColumns = [
-    { key: "track", label: "Track", sticky: true, stickyWidthRem: 10.5 },
+    { key: "track", label: "Track", sticky: true, stickyWidthRem: 10.5, className: "wrap-col" },
     { key: "starts", label: "Starts", className: "num-col" },
     { key: "wins", label: "Wins", className: "num-col" },
     {

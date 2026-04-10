@@ -164,7 +164,7 @@ function renderTeamTotalsView(model) {
   );
 
   const columns = [
-    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 14 },
+    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
     { key: "seasonsCount", label: "Seasons", className: "num-col" },
     { key: "driverCount", label: "Drivers", className: "num-col" },
     { key: "totalWcc", label: "WCC", className: "num-col" },
@@ -241,11 +241,11 @@ function renderTeamProfileView(dataset, model) {
     { key: "podiums", label: "Podiums", className: "num-col" },
     { key: "teamWeightedScore", label: "Team WS", className: "num-col", render: (row) => formatDecimal(row.teamWeightedScore) },
     { key: "avgDriverWeightedScore", label: "Avg driver WS", className: "num-col", render: (row) => formatDecimal(row.avgDriverWeightedScore) },
-    { key: "drivers", label: "Drivers", render: (row) => row.drivers.join(", ") || "n/a" },
+    { key: "drivers", label: "Drivers", className: "wrap-col", widthRem: 11.5, render: (row) => row.drivers.join(", ") || "n/a" },
     { key: "wcc", label: "WCC", render: (row) => (row.wcc ? "Yes" : "-") },
   ];
   const contributionColumns = [
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     { key: "seasonsCount", label: "Seasons", className: "num-col" },
     { key: "points", label: "Points", className: "num-col" },
     { key: "wins", label: "Wins", className: "num-col" },
@@ -258,12 +258,12 @@ function renderTeamProfileView(dataset, model) {
   ];
   const rosterColumns = [
     { key: "seasonId", label: "Season", strong: true, sticky: true, stickyWidthRem: 6.25 },
-    { key: "drivers", label: "Drivers", strong: true, sticky: true, stickyWidthRem: 15.5 },
-    { key: "cars", label: "Cars" },
+    { key: "drivers", label: "Drivers", strong: true, sticky: true, stickyWidthRem: 15.5, className: "wrap-col" },
+    { key: "cars", label: "Cars", className: "wrap-col", widthRem: 11 },
     { key: "points", label: "Points", className: "num-col" },
     { key: "wins", label: "Wins", className: "num-col" },
     { key: "wcc", label: "WCC" },
-    { key: "wdcDrivers", label: "WDC drivers" },
+    { key: "wdcDrivers", label: "WDC drivers", className: "wrap-col", widthRem: 11.5 },
   ];
 
   return `
@@ -339,7 +339,7 @@ function renderTeamProfileView(dataset, model) {
 function renderTeamCompareView(dataset, model) {
   const pickerRows = model.searchFiltered;
   const compareColumns = [
-    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 14 },
+    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
     { key: "seasonsCount", label: "Seasons", className: "num-col" },
     { key: "driverCount", label: "Drivers", className: "num-col" },
     { key: "totalWcc", label: "WCC", className: "num-col" },
@@ -466,12 +466,12 @@ function renderTeamHistoryView(model) {
   const repeatChampion = findMostFrequentLabel(model.historyRows.map((row) => row.championTeam));
   const columns = [
     { key: "seasonId", label: "Season", strong: true, sticky: true, stickyWidthRem: 6.25 },
-    { key: "championTeam", label: "Champion", strong: true, sticky: true, stickyWidthRem: 14 },
-    { key: "championDrivers", label: "Champion drivers" },
+    { key: "championTeam", label: "Champion", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
+    { key: "championDrivers", label: "Champion drivers", className: "wrap-col", widthRem: 11.5 },
     { key: "championPoints", label: "Champion pts", className: "num-col" },
-    { key: "runnerUpTeam", label: "Runner-up" },
+    { key: "runnerUpTeam", label: "Runner-up", className: "wrap-col", widthRem: 10.5 },
     { key: "gap", label: "Gap", className: "num-col", render: (row) => (row.gap == null ? "n/a" : formatDecimal(row.gap, 1)) },
-    { key: "wdcWinners", label: "WDC" },
+    { key: "wdcWinners", label: "WDC", className: "wrap-col", widthRem: 11 },
     { key: "type", label: "Division" },
   ];
 
@@ -527,7 +527,7 @@ function buildTeamComparisonCard(aggregate) {
 
 function buildTeamContributionCard(aggregate, rows) {
   const contributionColumns = [
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5, className: "wrap-col" },
     { key: "points", label: "Pts", className: "num-col" },
     { key: "wins", label: "Wins", className: "num-col" },
     { key: "shareOfPoints", label: "Pts share", className: "num-col", format: "percent" },
