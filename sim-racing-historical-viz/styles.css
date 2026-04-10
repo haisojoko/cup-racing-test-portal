@@ -400,6 +400,8 @@ input[type="text"] {
 .fingerprint-card,
 .change-card,
 .validation-item {
+  min-width: 0;
+  max-width: 100%;
   padding: 0.95rem 1rem;
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.78);
@@ -424,6 +426,15 @@ input[type="text"] {
   margin-bottom: 0.55rem;
 }
 
+.dataset-item__header > *,
+.saved-view__header > *,
+.profile-card__header > *,
+.comparison-card__header > *,
+.fingerprint-card__header > *,
+.change-card__header > * {
+  min-width: 0;
+}
+
 .dataset-item__title,
 .saved-view__title,
 .profile-card__title,
@@ -433,6 +444,7 @@ input[type="text"] {
   margin: 0;
   font-size: 1rem;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .dataset-item__meta,
@@ -646,6 +658,8 @@ input[type="text"] {
   justify-content: space-between;
   gap: 0.7rem;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.7rem 0.8rem;
   border-radius: var(--radius-md);
   border: 1px solid rgba(91, 66, 48, 0.11);
@@ -669,11 +683,13 @@ input[type="text"] {
 
 .driver-chip__name {
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .driver-chip__meta {
   color: var(--muted);
   font-size: 0.8rem;
+  overflow-wrap: anywhere;
 }
 
 .overview-cards {
@@ -924,6 +940,7 @@ input[type="text"] {
   font-size: clamp(1.7rem, 2vw, 2.25rem);
   font-weight: 800;
   line-height: 0.95;
+  overflow-wrap: anywhere;
 }
 
 /* Validation and chart primitives support both leaderboard charts and season detail SVGs. */
@@ -1281,6 +1298,7 @@ input[type="text"] {
 .data-table td.wrap-col {
   white-space: normal;
   overflow-wrap: anywhere;
+  word-break: break-word;
   line-height: 1.4;
 }
 
@@ -1402,6 +1420,7 @@ input[type="text"] {
   margin-top: 0.25rem;
   font-size: 1.15rem;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .score-breakdown {
@@ -1419,6 +1438,10 @@ input[type="text"] {
   justify-content: space-between;
   gap: 0.75rem;
   font-size: 0.86rem;
+}
+
+.bar-row__label > * {
+  min-width: 0;
 }
 
 .bar-track {
@@ -1441,6 +1464,8 @@ input[type="text"] {
 }
 
 .comparison-driver {
+  min-width: 0;
+  max-width: 100%;
   padding: 0.9rem;
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.82);
@@ -1455,8 +1480,13 @@ input[type="text"] {
   margin-bottom: 0.55rem;
 }
 
+.comparison-driver__title > * {
+  min-width: 0;
+}
+
 .comparison-driver__title strong {
   font-size: 1.05rem;
+  overflow-wrap: anywhere;
 }
 
 .comparison-driver__score {
@@ -1562,6 +1592,10 @@ input[type="text"] {
   font-size: 0.84rem;
 }
 
+.contribution-list span > * {
+  min-width: 0;
+}
+
 .fingerprint-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1587,6 +1621,9 @@ input[type="text"] {
   color: var(--teal);
   font-size: 0.8rem;
   font-weight: 700;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .pill--button {
@@ -1796,10 +1833,21 @@ input[type="text"] {
     padding: 0.85rem;
   }
 
+  .dataset-item__header,
+  .saved-view__header,
+  .profile-card__header,
+  .comparison-card__header,
+  .fingerprint-card__header,
+  .change-card__header,
   .season-panel__header,
   .venue-card__header,
   .table-card__header,
-  .comparison-driver__header {
+  .comparison-driver__header,
+  .comparison-driver__title,
+  .spec-split-card__title,
+  .bar-row__label,
+  .contribution-list span,
+  .driver-chip {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -1808,6 +1856,21 @@ input[type="text"] {
   .venue-card__meta,
   .table-card__meta {
     line-height: 1.45;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-card__value {
+    font-size: clamp(1.3rem, 6vw, 1.8rem);
+    line-height: 1.05;
+  }
+
+  .driver-chip .badge,
+  .comparison-driver__score,
+  .spec-split-card__score {
+    align-self: flex-start;
   }
 
   .table-wrap {
@@ -1823,6 +1886,13 @@ input[type="text"] {
   .data-table th {
     font-size: 0.72rem;
     letter-spacing: 0.05em;
+  }
+
+  .data-table th.wrap-col.is-sticky-col,
+  .data-table td.wrap-col.is-sticky-col {
+    width: min(12rem, 40vw) !important;
+    min-width: min(12rem, 40vw) !important;
+    max-width: min(12rem, 40vw) !important;
   }
 
   .preset-lab__summary {
