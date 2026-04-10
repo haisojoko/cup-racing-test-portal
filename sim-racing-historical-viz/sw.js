@@ -1,4 +1,4 @@
-const CACHE = "slipstream-v1";
+const CACHE = "slipstream-v4";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -7,6 +7,7 @@ const STATIC_ASSETS = [
   "/scripts/data.js",
   "/scripts/views-season.js",
   "/scripts/views-analysis.js",
+  "/scripts/views-teams.js",
   "/manifest.json",
   "/favicon.svg",
 ];
@@ -27,8 +28,12 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Cache-first for static assets; network-first for the remote data file.
+// Same-origin app shell uses network-first for faster updates; remote data stays uncached.
 self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") {
+    return;
+  }
+
   const url = new URL(event.request.url);
 
   // Let the remote archive fetch go straight to network (no caching — data may update).
@@ -36,15 +41,35 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const isSameOrigin = url.origin === self.location.origin;
+
+  if (isSameOrigin) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
-        if (response.ok && event.request.method === "GET") {
-          const clone = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
+      return (
+        cached ||
+        fetch(event.request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+      );
     })
   );
 });
