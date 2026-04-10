@@ -2,6 +2,14 @@
 
 Standalone no-build web app for historical sim racing analysis.
 
+## Deploy
+
+This project now includes a minimal `wrangler.toml` for Cloudflare Workers static-assets deploys.
+
+- Run `wrangler deploy` from this folder to publish the site as static assets.
+- The deploy uses the project root as the asset directory.
+- `.assetsignore` excludes local project docs/config files from the public bundle.
+
 ## Open It
 
 Open [index.html](c:\Users\josiah.koo\sim-racing-historical-viz\index.html) directly in a browser, then:
