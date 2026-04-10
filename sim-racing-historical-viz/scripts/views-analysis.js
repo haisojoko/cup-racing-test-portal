@@ -481,7 +481,7 @@ function renderInsightExplorer(activeCard) {
 // Season columns pivot between weighted, totals, pace, results, and efficiency without changing the underlying ranked rows.
 function buildSeasonInsightColumns(view) {
   const baseColumns = [
-    { key: "driver", label: "Driver", strong: true },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
     { key: "seasonId", label: "Season", strong: true },
   ];
 
@@ -542,7 +542,7 @@ function buildSeasonInsightColumns(view) {
 
 function buildTrackTyrantColumns(view) {
   const baseColumns = [
-    { key: "driver", label: "Driver", strong: true },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
     {
       key: "signatureTrack",
       label: "Signature track",
@@ -624,7 +624,7 @@ function buildTrackTyrantColumns(view) {
 // Career columns expose the same grouped rows through different metric families without changing which career slices are ranked.
 function buildCareerInsightColumns(view) {
   const baseColumns = [
-    { key: "driver", label: "Driver", strong: true },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
     { key: "seasonsCount", label: "Seasons" },
   ];
 
@@ -1002,6 +1002,24 @@ function renderTrackPerformance(dataset) {
 
   // Normalise scores against the driver's personal max so the bar widths are meaningful.
   const maxScore = tracks.reduce((best, t) => Math.max(best, t.trackScore || 0), 0);
+  const tableColumns = prepareTableColumns([
+    {
+      label: "#",
+      sticky: true,
+      stickyWidthRem: 3.25,
+      className: "rank-col",
+    },
+    {
+      label: "Track",
+      sticky: true,
+      stickyWidthRem: 11.5,
+    },
+    { label: "Starts", className: "num-col" },
+    { label: "Wins", className: "num-col" },
+    { label: "Podiums", className: "num-col" },
+    { label: "Top 5s", className: "num-col" },
+    { label: "Score" },
+  ]);
 
   refs["track-performance"].innerHTML = `
     <article class="profile-card fade-in">
@@ -1009,13 +1027,13 @@ function renderTrackPerformance(dataset) {
         <table class="data-table">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Track</th>
-              <th class="num-col">Starts</th>
-              <th class="num-col">Wins</th>
-              <th class="num-col">Podiums</th>
-              <th class="num-col">Top 5s</th>
-              <th>Score</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[0], { header: true })}>#</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[1], { header: true })}>Track</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[2], { header: true })}>Starts</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[3], { header: true })}>Wins</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[4], { header: true })}>Podiums</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[5], { header: true })}>Top 5s</th>
+              <th scope="col"${buildTableCellAttributes(tableColumns[6], { header: true })}>Score</th>
             </tr>
           </thead>
           <tbody>
@@ -1024,13 +1042,13 @@ function renderTrackPerformance(dataset) {
                 const barWidth = maxScore > 0 ? Math.round((t.trackScore / maxScore) * 100) : 0;
                 return `
                   <tr>
-                    <td class="rank-col">${index + 1}</td>
-                    <td>${escapeHtml(t.track)}</td>
-                    <td class="num-col">${formatInteger(t.starts)}</td>
-                    <td class="num-col">${formatInteger(t.wins)}</td>
-                    <td class="num-col">${formatInteger(t.podiums)}</td>
-                    <td class="num-col">${formatInteger(t.top5s)}</td>
-                    <td>
+                    <td${buildTableCellAttributes(tableColumns[0])}>${index + 1}</td>
+                    <td${buildTableCellAttributes(tableColumns[1])}>${escapeHtml(t.track)}</td>
+                    <td${buildTableCellAttributes(tableColumns[2])}>${formatInteger(t.starts)}</td>
+                    <td${buildTableCellAttributes(tableColumns[3])}>${formatInteger(t.wins)}</td>
+                    <td${buildTableCellAttributes(tableColumns[4])}>${formatInteger(t.podiums)}</td>
+                    <td${buildTableCellAttributes(tableColumns[5])}>${formatInteger(t.top5s)}</td>
+                    <td${buildTableCellAttributes(tableColumns[6])}>
                       <div class="track-score-cell">
                         <div class="track-score-bar-wrap">
                           <div class="track-score-bar" style="width:${barWidth}%"></div>
@@ -1062,6 +1080,12 @@ function renderComparisonTopTracks(dataset) {
   }
 
   const topTracksByDriver = getDriversTopTracks(dataset, state.selectedDrivers, cache, 3);
+  const comparisonColumns = prepareTableColumns([
+    { label: "Track", sticky: true, stickyWidthRem: 10.5 },
+    { label: "Starts", className: "num-col" },
+    { label: "Wins", className: "num-col" },
+    { label: "Score", className: "num-col" },
+  ]);
 
   refs["comparison-top-tracks"].innerHTML = `
     <article class="comparison-card fade-in">
@@ -1077,30 +1101,32 @@ function renderComparisonTopTracks(dataset) {
                 </div>
                 ${
                   tracks.length
-                    ? `<table class="data-table data-table--compact">
-                        <thead>
-                          <tr>
-                            <th>Track</th>
-                            <th class="num-col">Starts</th>
-                            <th class="num-col">Wins</th>
-                            <th class="num-col">Score</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${tracks
-                            .map(
-                              (t) => `
+                    ? `<div class="table-wrap">
+                        <table class="data-table data-table--compact">
+                          <thead>
                             <tr>
-                              <td>${escapeHtml(t.track)}</td>
-                              <td class="num-col">${formatInteger(t.starts)}</td>
-                              <td class="num-col">${formatInteger(t.wins)}</td>
-                              <td class="num-col">${formatDecimal(t.trackScore)}</td>
+                              <th scope="col"${buildTableCellAttributes(comparisonColumns[0], { header: true })}>Track</th>
+                              <th scope="col"${buildTableCellAttributes(comparisonColumns[1], { header: true })}>Starts</th>
+                              <th scope="col"${buildTableCellAttributes(comparisonColumns[2], { header: true })}>Wins</th>
+                              <th scope="col"${buildTableCellAttributes(comparisonColumns[3], { header: true })}>Score</th>
                             </tr>
-                          `,
-                            )
-                            .join("")}
-                        </tbody>
-                      </table>`
+                          </thead>
+                          <tbody>
+                            ${tracks
+                              .map(
+                                (t) => `
+                              <tr>
+                                <td${buildTableCellAttributes(comparisonColumns[0])}>${escapeHtml(t.track)}</td>
+                                <td${buildTableCellAttributes(comparisonColumns[1])}>${formatInteger(t.starts)}</td>
+                                <td${buildTableCellAttributes(comparisonColumns[2])}>${formatInteger(t.wins)}</td>
+                                <td${buildTableCellAttributes(comparisonColumns[3])}>${formatDecimal(t.trackScore)}</td>
+                              </tr>
+                            `,
+                              )
+                              .join("")}
+                          </tbody>
+                        </table>
+                      </div>`
                     : `<div class="subtle-text">No venue data available.</div>`
                 }
               </div>

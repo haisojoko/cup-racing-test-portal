@@ -152,8 +152,8 @@ function renderSeasonDetail(dataset) {
   renderSeasonProgressChart(detail);
 
   const standingsColumns = [
-    { key: "rankLabel", label: "Pos", strong: true },
-    { key: "driver", label: "Driver", strong: true },
+    { key: "rankLabel", label: "Pos", strong: true, sticky: true, stickyWidthRem: 3.75 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
     ...(detail.standings.some((row) => row.className)
       ? [{ key: "className", label: "Class" }]
       : []),
@@ -171,7 +171,7 @@ function renderSeasonDetail(dataset) {
   ];
 
   const teamColumns = [
-    { key: "teamName", label: "Team", strong: true },
+    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 11.5 },
     { key: "points", label: "Points" },
     {
       key: "members",
@@ -633,7 +633,7 @@ function buildTableCard(title, meta, columns, rows) {
 // Venue cards render one detailed event table per venue block in the Markdown archive.
 function buildVenueCard(venue) {
   const columns = [
-    { key: "driver", label: "Driver", strong: true },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 11.5 },
     ...(venue.rows.some((row) => row.className)
       ? [{ key: "className", label: "Class" }]
       : []),
@@ -683,17 +683,21 @@ function renderDataTable(columns, rows) {
     return renderEmptyStateMarkup("No rows available for this table.");
   }
 
-  const headerMarkup = columns
-    .map((column) => `<th scope="col">${escapeHtml(column.label)}</th>`)
+  const preparedColumns = prepareTableColumns(columns);
+  const headerMarkup = preparedColumns
+    .map(
+      (column) =>
+        `<th scope="col"${buildTableCellAttributes(column, { header: true })}>${escapeHtml(column.label)}</th>`,
+    )
     .join("");
   const bodyMarkup = rows
     .map((row) => {
-      const cells = columns
+      const cells = preparedColumns
         .map((column) => {
           const value = column.render
             ? column.render(row)
             : formatTableValue(row[column.key], column.format);
-          return `<td class="${column.strong ? "is-strong" : ""}">${escapeHtml(value)}</td>`;
+          return `<td${buildTableCellAttributes(column)}>${escapeHtml(value)}</td>`;
         })
         .join("");
       return `<tr>${cells}</tr>`;
@@ -708,6 +712,65 @@ function renderDataTable(columns, rows) {
       <tbody>${bodyMarkup}</tbody>
     </table>
   `;
+}
+
+function prepareTableColumns(columns) {
+  const stickyIndexes = columns.reduce((indexes, column, index) => {
+    if (column.sticky) {
+      indexes.push(index);
+    }
+    return indexes;
+  }, []);
+  const stickyBoundaryIndex = stickyIndexes[stickyIndexes.length - 1];
+  let stickyLeftRem = 0;
+
+  return columns.map((column, index) => {
+    if (!column.sticky) {
+      return column;
+    }
+
+    const stickyWidthRem = column.stickyWidthRem || 10;
+    const preparedColumn = {
+      ...column,
+      stickyLeftRem,
+      stickyWidthRem,
+      isStickyBoundary: index === stickyBoundaryIndex,
+    };
+    stickyLeftRem += stickyWidthRem;
+    return preparedColumn;
+  });
+}
+
+function buildTableCellAttributes(column, options = {}) {
+  const classNames = [];
+  if (column.className) {
+    classNames.push(column.className);
+  }
+  if (options.header && column.headerClassName) {
+    classNames.push(column.headerClassName);
+  }
+  if (!options.header && column.cellClassName) {
+    classNames.push(column.cellClassName);
+  }
+  if (!options.header && column.strong) {
+    classNames.push("is-strong");
+  }
+  if (column.sticky) {
+    classNames.push("is-sticky-col");
+  }
+  if (column.isStickyBoundary) {
+    classNames.push("is-sticky-boundary");
+  }
+
+  const styleParts = [];
+  if (column.sticky) {
+    styleParts.push(`left:${column.stickyLeftRem}rem`);
+    styleParts.push(`min-width:${column.stickyWidthRem}rem`);
+    styleParts.push(`width:${column.stickyWidthRem}rem`);
+    styleParts.push(`max-width:${column.stickyWidthRem}rem`);
+  }
+
+  return `${classNames.length ? ` class="${classNames.join(" ")}"` : ""}${styleParts.length ? ` style="${styleParts.join(";")}"` : ""}`;
 }
 
 function formatTableValue(value, format) {

@@ -1103,14 +1103,17 @@ input[type="text"] {
 }
 
 .table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   border-radius: var(--radius-md);
   border: 1px solid rgba(91, 66, 48, 0.08);
 }
 
 .data-table {
-  width: 100%;
-  min-width: 720px;
+  width: max-content;
+  min-width: max(100%, 44rem);
   border-collapse: collapse;
   background: rgba(255, 255, 255, 0.92);
 }
@@ -1133,6 +1136,35 @@ input[type="text"] {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
+}
+
+.data-table th.is-sticky-col,
+.data-table td.is-sticky-col {
+  position: sticky;
+  left: 0;
+  background-clip: padding-box;
+  overflow-wrap: anywhere;
+}
+
+.data-table th.is-sticky-col {
+  z-index: 4;
+  background: #fff7ef;
+}
+
+.data-table td.is-sticky-col {
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.data-table tbody tr:nth-child(even) td.is-sticky-col {
+  background: rgba(249, 243, 237, 0.96);
+}
+
+.data-table th.is-sticky-boundary,
+.data-table td.is-sticky-boundary {
+  box-shadow:
+    inset -1px 0 0 rgba(91, 66, 48, 0.1),
+    12px 0 16px -16px rgba(33, 23, 18, 0.65);
 }
 
 .data-table tbody tr:nth-child(even) {
@@ -1485,9 +1517,14 @@ input[type="text"] {
   font-size: 0.84rem;
 }
 
+.data-table--compact {
+  min-width: max(100%, 30rem);
+}
+
 .num-col {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .rank-col {
@@ -1495,6 +1532,7 @@ input[type="text"] {
   text-align: right;
   color: var(--muted);
   font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .comparison-driver__header {
@@ -1581,6 +1619,52 @@ input[type="text"] {
     grid-template-columns: 1fr;
   }
 
+  .profile-card,
+  .comparison-card,
+  .season-panel,
+  .venue-card,
+  .table-card,
+  .comparison-driver {
+    padding: 0.85rem;
+  }
+
+  .season-panel__header,
+  .venue-card__header,
+  .table-card__header,
+  .comparison-driver__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .season-panel__meta,
+  .venue-card__meta,
+  .table-card__meta {
+    line-height: 1.45;
+  }
+
+  .table-wrap {
+    border-radius: calc(var(--radius-md) - 2px);
+  }
+
+  .data-table {
+    min-width: max(100%, 36rem);
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.55rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
+  .data-table th {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+  }
+
+  .data-table--compact {
+    min-width: max(100%, 28rem);
+  }
+
   .preset-lab__summary {
     grid-template-columns: 1fr;
   }
@@ -1603,5 +1687,9 @@ input[type="text"] {
   .leaderboard-row__season {
     grid-column: 2;
     text-align: left;
+  }
+
+  .track-score-cell {
+    min-width: 8rem;
   }
 }
