@@ -1277,6 +1277,13 @@ input[type="text"] {
   overflow-wrap: normal;
 }
 
+.data-table th.wrap-col,
+.data-table td.wrap-col {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
 .data-table th.is-sticky-col {
   z-index: 4;
   background: #fff7ef;

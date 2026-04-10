@@ -167,15 +167,25 @@ function renderSeasonDetail(dataset) {
     { key: "fastestLaps", label: "FLs" },
     { key: "pointsRate", label: "Pts rate", format: "percent" },
     { key: "top5Rate", label: "Top 5", format: "percent" },
-    { key: "teamName", label: "Team" },
+    { key: "teamName", label: "Team", className: "wrap-col", minWidthRem: 11.5 },
   ];
 
   const teamColumns = [
-    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    {
+      key: "teamName",
+      label: "Team",
+      strong: true,
+      sticky: true,
+      stickyWidthRem: 11.5,
+      className: "wrap-col",
+      minWidthRem: 11.5,
+    },
     { key: "points", label: "Points" },
     {
       key: "members",
       label: "Drivers",
+      className: "wrap-col",
+      minWidthRem: 13,
       render: (row) => row.members.join(", ") || "n/a",
     },
   ];
