@@ -167,15 +167,25 @@ function renderSeasonDetail(dataset) {
     { key: "fastestLaps", label: "FLs" },
     { key: "pointsRate", label: "Pts rate", format: "percent" },
     { key: "top5Rate", label: "Top 5", format: "percent" },
-    { key: "teamName", label: "Team" },
+    { key: "teamName", label: "Team", className: "wrap-col", minWidthRem: 11.5 },
   ];
 
   const teamColumns = [
-    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 11.5 },
+    {
+      key: "teamName",
+      label: "Team",
+      strong: true,
+      sticky: true,
+      stickyWidthRem: 11.5,
+      className: "wrap-col",
+      minWidthRem: 11.5,
+    },
     { key: "points", label: "Points" },
     {
       key: "members",
       label: "Drivers",
+      className: "wrap-col",
+      minWidthRem: 13,
       render: (row) => row.members.join(", ") || "n/a",
     },
   ];
@@ -613,7 +623,7 @@ function buildRankTicks(driverCount) {
 }
 
 // Shared table-card wrappers keep season detail sections visually consistent.
-function buildTableCard(title, meta, columns, rows) {
+function buildTableCard(title, meta, columns, rows, options = {}) {
   return `
     <article class="table-card fade-in">
       <div class="table-card__header">
@@ -624,7 +634,7 @@ function buildTableCard(title, meta, columns, rows) {
         <span class="badge">${escapeHtml(String(rows.length))} rows</span>
       </div>
       <div class="table-wrap">
-        ${renderDataTable(columns, rows)}
+        ${renderDataTable(columns, rows, options)}
       </div>
     </article>
   `;
@@ -678,12 +688,14 @@ function buildVenueCard(venue) {
 }
 
 // Generic table renderer backs both standings and venue drill-down tables.
-function renderDataTable(columns, rows) {
+function renderDataTable(columns, rows, options = {}) {
   if (!rows.length) {
     return renderEmptyStateMarkup("No rows available for this table.");
   }
 
   const preparedColumns = prepareTableColumns(columns);
+  const tableClassName = ["data-table", options.tableClassName].filter(Boolean).join(" ");
+  const tableStyle = buildTableStyle(preparedColumns, options);
   const headerMarkup = preparedColumns
     .map(
       (column) =>
@@ -705,13 +717,54 @@ function renderDataTable(columns, rows) {
     .join("");
 
   return `
-    <table class="data-table">
+    <table class="${tableClassName}"${tableStyle}>
       <thead>
         <tr>${headerMarkup}</tr>
       </thead>
       <tbody>${bodyMarkup}</tbody>
     </table>
   `;
+}
+
+function buildTableStyle(columns, options = {}) {
+  const tableMinWidthRem = options.minWidthRem || getTableMinWidthRem(columns, options);
+  return ` style="--table-min-width-rem:${tableMinWidthRem}"`;
+}
+
+function getTableMinWidthRem(columns, options = {}) {
+  const compact = Boolean(options.compact || (options.tableClassName || "").includes("data-table--compact"));
+  const floor = compact ? 34 : 44;
+
+  const totalWidth = columns.reduce((sum, column) => sum + getColumnWidthRem(column, compact), 0);
+  return Math.max(floor, Math.round(totalWidth * 4) / 4);
+}
+
+function getColumnWidthRem(column, compact) {
+  if (typeof column.minWidthRem === "number") {
+    return column.minWidthRem;
+  }
+
+  if (column.sticky && typeof column.stickyWidthRem === "number") {
+    return column.stickyWidthRem;
+  }
+
+  const className = [column.className, column.headerClassName, column.cellClassName]
+    .filter(Boolean)
+    .join(" ");
+
+  if (className.includes("rank-col")) {
+    return compact ? 3.25 : 3.75;
+  }
+
+  if (className.includes("num-col")) {
+    return compact ? 5.5 : 6.25;
+  }
+
+  if (column.strong || typeof column.render === "function") {
+    return compact ? 8 : 8.75;
+  }
+
+  return compact ? 7 : 7.75;
 }
 
 function prepareTableColumns(columns) {
