@@ -1089,6 +1089,14 @@ function averageOf(items, key) {
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
 }
 
+function sumOf(items, key) {
+  const values = items.map((item) => item[key]).filter((value) => value != null);
+  if (!values.length) {
+    return null;
+  }
+  return Number(values.reduce((sum, value) => sum + value, 0).toFixed(3));
+}
+
 function deriveAverage(total, count) {
   if (!count) {
     return null;
@@ -1106,6 +1114,7 @@ function deriveRate(total, count) {
 // All leaderboards and charts start from the same filtered weighted-season record slice.
 function getFilteredSeasonRecords(dataset, options = {}) {
   const ignoreDivision = Boolean(options.ignoreDivision);
+  const ignoreTeam = Boolean(options.ignoreTeam);
   return dataset.weightedRecords.filter((record) => {
     if (record.isUpcoming) {
       return false;
@@ -1119,7 +1128,7 @@ function getFilteredSeasonRecords(dataset, options = {}) {
     if (!ignoreDivision && state.filters.division !== "all" && record.type !== state.filters.division) {
       return false;
     }
-    if (state.filters.team !== "all" && record.teamName !== state.filters.team) {
+    if (!ignoreTeam && state.filters.team !== "all" && record.teamName !== state.filters.team) {
       return false;
     }
     if (state.filters.car !== "all" && record.car !== state.filters.car) {
@@ -1214,6 +1223,265 @@ function scoreCareerAggregates(aggregates, preset) {
       };
     })
     .sort((left, right) => right.composite - left.composite);
+}
+
+const TEAM_SCORE_WEIGHTS = {
+  totalWcc: 0.32,
+  totalPoints: 0.22,
+  totalWins: 0.16,
+  avgTeamWeightedScore: 0.14,
+  peakTeamWeightedScore: 0.1,
+  totalWdc: 0.06,
+};
+
+function buildTeamSeasonRows(dataset) {
+  const records = getFilteredSeasonRecords(dataset, { ignoreTeam: true });
+  const seasonDetailsById = createLookup(dataset.seasonDetails || [], "seasonId");
+  const grouped = {};
+
+  records.forEach((record) => {
+    const teamName = normalizeInlineText(record.teamName || "");
+    if (!teamName) {
+      return;
+    }
+
+    const key = `${record.seasonId}|||${teamName}`;
+    if (!grouped[key]) {
+      grouped[key] = {
+        teamName,
+        seasonId: record.seasonId,
+        seasonOrder: record.seasonOrder,
+        eraLabel: record.eraLabel || "",
+        type: record.type || "",
+        records: [],
+      };
+    }
+
+    grouped[key].records.push(record);
+  });
+
+  return Object.values(grouped)
+    .map((entry) => {
+      const detail = seasonDetailsById[entry.seasonId] || null;
+      const teamStanding = detail?.teamStandings?.find((row) => row.teamName === entry.teamName) || null;
+      const drivers = uniqueList(entry.records.map((record) => record.driver));
+      const cars = uniqueList(entry.records.map((record) => record.car));
+      const officialPoints = teamStanding?.points ?? null;
+      const derivedPoints = sumOf(entry.records, "points");
+      const slicePoints = derivedPoints ?? officialPoints;
+      const teamWeightedScore = sumOf(entry.records, "weightedScore");
+      const avgDriverWeightedScore = averageOf(entry.records, "weightedScore");
+      const leaderPoints = detail?.teamStandings?.[0]?.points ?? null;
+      const wdcDrivers = uniqueList(
+        entry.records.filter((record) => record.wdc).map((record) => record.driver),
+      );
+      const members = uniqueList([...(teamStanding?.members || []), ...drivers]);
+
+      return {
+        teamName: entry.teamName,
+        seasonId: entry.seasonId,
+        seasonOrder: entry.seasonOrder,
+        eraLabel: entry.eraLabel,
+        type: entry.type,
+        cars,
+        drivers,
+        members,
+        driverCount: drivers.length,
+        points: slicePoints,
+        wins: sumOf(entry.records, "wins"),
+        podiums: sumOf(entry.records, "podiums"),
+        poles: sumOf(entry.records, "poles"),
+        fastestLaps: sumOf(entry.records, "fastestLaps"),
+        races: sumOf(entry.records, "races"),
+        avgPointsRate: averageOf(entry.records, "pointsRate"),
+        avgTop5Rate: averageOf(entry.records, "top5Rate"),
+        teamWeightedScore,
+        avgDriverWeightedScore,
+        wcc:
+          normalizeInlineText(detail?.wccTeam || "") === entry.teamName ||
+          entry.records.some((record) => record.wcc),
+        wdcDrivers,
+        seasonStandingRank: detail?.teamStandings?.findIndex((row) => row.teamName === entry.teamName) + 1 || null,
+        gapToLeader:
+          leaderPoints != null && slicePoints != null
+            ? Number((leaderPoints - slicePoints).toFixed(1))
+            : null,
+      };
+    })
+    .sort((left, right) => right.seasonOrder - left.seasonOrder);
+}
+
+function buildTeamAggregates(dataset) {
+  const seasonRows = buildTeamSeasonRows(dataset);
+  const grouped = groupBy(seasonRows, "teamName");
+
+  const aggregates = Object.entries(grouped).map(([teamName, rows]) => {
+    const seasons = sortBySeason(rows);
+    const latestSeason = seasons[seasons.length - 1] || null;
+    const peakSeason =
+      [...seasons].sort((left, right) => {
+        const weightedGap = (right.teamWeightedScore || 0) - (left.teamWeightedScore || 0);
+        if (weightedGap !== 0) {
+          return weightedGap;
+        }
+        return (right.points || 0) - (left.points || 0);
+      })[0] || null;
+    const drivers = uniqueList(seasons.flatMap((row) => row.drivers));
+
+    return {
+      teamName,
+      seasons,
+      seasonsCount: seasons.length,
+      drivers,
+      driverCount: drivers.length,
+      totalPoints: sumOf(seasons, "points"),
+      totalWins: sumOf(seasons, "wins"),
+      totalPodiums: sumOf(seasons, "podiums"),
+      totalPoles: sumOf(seasons, "poles"),
+      totalFastestLaps: sumOf(seasons, "fastestLaps"),
+      totalRaces: sumOf(seasons, "races"),
+      totalWcc: seasons.filter((row) => row.wcc).length,
+      totalWdc: seasons.reduce((sum, row) => sum + row.wdcDrivers.length, 0),
+      avgPointsPerSeason: averageOf(seasons, "points"),
+      avgTeamWeightedScore: averageOf(seasons, "teamWeightedScore"),
+      peakTeamWeightedScore: peakSeason?.teamWeightedScore ?? null,
+      avgPointsRate: averageOf(seasons, "avgPointsRate"),
+      avgTop5Rate: averageOf(seasons, "avgTop5Rate"),
+      latestSeason,
+      peakSeason,
+    };
+  });
+
+  return scoreTeamAggregates(aggregates);
+}
+
+function scoreTeamAggregates(aggregates) {
+  const metricMax = {
+    totalWcc: maxOf(aggregates, (item) => item.totalWcc),
+    totalPoints: maxOf(aggregates, (item) => item.totalPoints),
+    totalWins: maxOf(aggregates, (item) => item.totalWins),
+    avgTeamWeightedScore: maxOf(aggregates, (item) => item.avgTeamWeightedScore),
+    peakTeamWeightedScore: maxOf(aggregates, (item) => item.peakTeamWeightedScore),
+    totalWdc: maxOf(aggregates, (item) => item.totalWdc),
+  };
+
+  return aggregates
+    .map((aggregate) => {
+      const contributions = Object.entries(TEAM_SCORE_WEIGHTS).map(([key, weight]) => ({
+        key,
+        label: metricLabel(key),
+        weight,
+        normalized: normalizeAgainstMax(aggregate[key], metricMax[key]) || 0,
+        rawValue: aggregate[key],
+        value: (normalizeAgainstMax(aggregate[key], metricMax[key]) || 0) * weight,
+      }));
+      const teamScore = contributions.reduce((sum, contribution) => sum + contribution.value, 0);
+      return {
+        ...aggregate,
+        teamScore,
+        contributions,
+      };
+    })
+    .sort((left, right) => {
+      const scoreGap = right.teamScore - left.teamScore;
+      if (scoreGap !== 0) {
+        return scoreGap;
+      }
+      const titleGap = (right.totalWcc || 0) - (left.totalWcc || 0);
+      if (titleGap !== 0) {
+        return titleGap;
+      }
+      return (right.totalPoints || 0) - (left.totalPoints || 0);
+    });
+}
+
+function buildTeamContributionRows(dataset, teamName, options = {}) {
+  const cleanTeamName = normalizeInlineText(teamName || "");
+  if (!cleanTeamName) {
+    return [];
+  }
+
+  const seasonId = normalizeInlineText(options.seasonId || "");
+  const records = getFilteredSeasonRecords(dataset, { ignoreTeam: true }).filter((record) => {
+    if (normalizeInlineText(record.teamName || "") !== cleanTeamName) {
+      return false;
+    }
+    if (seasonId && seasonId !== "all" && record.seasonId !== seasonId) {
+      return false;
+    }
+    return true;
+  });
+
+  const grouped = groupBy(records, "driver");
+  const slicePoints = sumOf(records, "points");
+  const sliceWeightedScore = sumOf(records, "weightedScore");
+
+  return Object.entries(grouped)
+    .map(([driver, rows]) => {
+      const ordered = sortBySeason(rows);
+      const points = sumOf(rows, "points");
+      const weightedScore = sumOf(rows, "weightedScore");
+      return {
+        driver,
+        seasonsCount: rows.length,
+        points,
+        wins: sumOf(rows, "wins"),
+        podiums: sumOf(rows, "podiums"),
+        poles: sumOf(rows, "poles"),
+        fastestLaps: sumOf(rows, "fastestLaps"),
+        races: sumOf(rows, "races"),
+        avgWeightedScore: averageOf(rows, "weightedScore"),
+        weightedScore,
+        shareOfPoints:
+          slicePoints && points != null ? Number(((points / slicePoints) * 100).toFixed(1)) : null,
+        shareOfWeightedScore:
+          sliceWeightedScore && weightedScore != null
+            ? Number(((weightedScore / sliceWeightedScore) * 100).toFixed(1))
+            : null,
+        wdcCount: rows.filter((row) => row.wdc).length,
+        wccCount: rows.filter((row) => row.wcc).length,
+        firstSeasonId: ordered[0]?.seasonId || "",
+        latestSeasonId: ordered[ordered.length - 1]?.seasonId || "",
+      };
+    })
+    .sort((left, right) => {
+      const pointGap = (right.points || 0) - (left.points || 0);
+      if (pointGap !== 0) {
+        return pointGap;
+      }
+      return (right.weightedScore || 0) - (left.weightedScore || 0);
+    });
+}
+
+function buildWccHistoryRows(dataset) {
+  return sortBySeason((dataset.seasonDetails || []).filter((detail) => !detail.isUpcoming))
+    .reverse()
+    .map((detail) => {
+      const champion =
+        detail.teamStandings?.[0] || {
+          teamName: normalizeInlineText(detail.wccTeam || ""),
+          points: null,
+          members: parseTeamMembers(detail.wccTeam || ""),
+        };
+      const runnerUp = detail.teamStandings?.[1] || null;
+      return {
+        seasonId: detail.seasonId,
+        eraLabel: detail.eraLabel,
+        type: detail.type,
+        championTeam: champion.teamName || "n/a",
+        championPoints: champion.points,
+        championDrivers: (champion.members || []).join(", ") || "n/a",
+        runnerUpTeam: runnerUp?.teamName || "n/a",
+        runnerUpPoints: runnerUp?.points ?? null,
+        gap:
+          champion.points != null && runnerUp?.points != null
+            ? Number((champion.points - runnerUp.points).toFixed(1))
+            : null,
+        wdcWinners:
+          detail.wdcWinners?.map((winner) => winner.name).join(", ") || "n/a",
+        venues: detail.venues?.length || 0,
+      };
+    });
 }
 
 // Build per-driver-per-track aggregates across all completed seasons.

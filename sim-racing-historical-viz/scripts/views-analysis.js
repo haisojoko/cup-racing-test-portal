@@ -3,7 +3,10 @@
 // Overview cards summarize the imported dataset and surface parser warnings at a glance.
 function renderOverview(dataset) {
   const warnings = dataset.validations.filter((entry) => entry.level === "warning").length;
-  const infos = dataset.validations.filter((entry) => entry.level === "info").length;
+  const visibleValidations = dataset.validations.filter(
+    (entry) => !isValidationDismissed(dataset.id, entry),
+  );
+  const infos = visibleValidations.filter((entry) => entry.level === "info").length;
   refs["dataset-kicker"].textContent = `${dataset.name} | imported ${formatTimestamp(dataset.importedAt)}`;
   refs["dataset-title"].textContent = dataset.title;
   refs["dataset-status-badge"].textContent = warnings
@@ -23,19 +26,34 @@ function renderOverview(dataset) {
     ),
   ].join("");
 
-  refs["validation-summary"].innerHTML = dataset.validations.length
-    ? dataset.validations
-        .map(
-          (entry) => `
+  refs["validation-summary"].innerHTML = visibleValidations.length
+    ? visibleValidations
+        .map((entry) => {
+          const validationIndex = dataset.validations.indexOf(entry);
+          return `
             <div class="validation-item fade-in">
               <div class="validation-item__status ${entry.level === "warning" ? "is-warning" : "is-info"}">${escapeHtml(entry.level)}</div>
-              <div>
+              <div class="validation-item__body">
                 <strong>${escapeHtml(entry.title)}</strong>
                 <div class="subtle-text">${escapeHtml(entry.detail)}</div>
               </div>
+              ${
+                entry.level === "info"
+                  ? `<button
+                      class="validation-item__dismiss"
+                      type="button"
+                      data-dismiss-validation="true"
+                      data-validation-index="${validationIndex}"
+                      aria-label="Dismiss ${escapeHtml(entry.title)}"
+                      title="Dismiss this info card"
+                    >
+                      Hide
+                    </button>`
+                  : ""
+              }
             </div>
-          `,
-        )
+          `;
+        })
         .join("")
     : `<div class="validation-item"><div class="validation-item__status is-info">clean</div><div><strong>No import warnings</strong><div class="subtle-text">The dataset shape matches the current parser assumptions.</div></div></div>`;
 }
@@ -1004,27 +1022,30 @@ function renderTrackPerformance(dataset) {
   const maxScore = tracks.reduce((best, t) => Math.max(best, t.trackScore || 0), 0);
   const tableColumns = prepareTableColumns([
     {
+      key: "rank",
       label: "#",
       sticky: true,
       stickyWidthRem: 3.25,
       className: "rank-col",
     },
     {
+      key: "track",
       label: "Track",
       sticky: true,
       stickyWidthRem: 11.5,
     },
-    { label: "Starts", className: "num-col" },
-    { label: "Wins", className: "num-col" },
-    { label: "Podiums", className: "num-col" },
-    { label: "Top 5s", className: "num-col" },
-    { label: "Score" },
+    { key: "starts", label: "Starts", className: "num-col" },
+    { key: "wins", label: "Wins", className: "num-col" },
+    { key: "podiums", label: "Podiums", className: "num-col" },
+    { key: "top5s", label: "Top 5s", className: "num-col" },
+    { key: "trackScore", label: "Score" },
   ]);
+  const trackTableStyle = buildTableStyle(tableColumns);
 
   refs["track-performance"].innerHTML = `
     <article class="profile-card fade-in">
       <div class="table-wrap">
-        <table class="data-table">
+        <table class="data-table"${trackTableStyle}>
           <thead>
             <tr>
               <th scope="col"${buildTableCellAttributes(tableColumns[0], { header: true })}>#</th>
@@ -1080,12 +1101,17 @@ function renderComparisonTopTracks(dataset) {
   }
 
   const topTracksByDriver = getDriversTopTracks(dataset, state.selectedDrivers, cache, 3);
-  const comparisonColumns = prepareTableColumns([
-    { label: "Track", sticky: true, stickyWidthRem: 10.5 },
-    { label: "Starts", className: "num-col" },
-    { label: "Wins", className: "num-col" },
-    { label: "Score", className: "num-col" },
-  ]);
+  const comparisonColumns = [
+    { key: "track", label: "Track", sticky: true, stickyWidthRem: 10.5 },
+    { key: "starts", label: "Starts", className: "num-col" },
+    { key: "wins", label: "Wins", className: "num-col" },
+    {
+      key: "trackScore",
+      label: "Score",
+      className: "num-col",
+      render: (row) => formatDecimal(row.trackScore),
+    },
+  ];
 
   refs["comparison-top-tracks"].innerHTML = `
     <article class="comparison-card fade-in">
@@ -1102,30 +1128,10 @@ function renderComparisonTopTracks(dataset) {
                 ${
                   tracks.length
                     ? `<div class="table-wrap">
-                        <table class="data-table data-table--compact">
-                          <thead>
-                            <tr>
-                              <th scope="col"${buildTableCellAttributes(comparisonColumns[0], { header: true })}>Track</th>
-                              <th scope="col"${buildTableCellAttributes(comparisonColumns[1], { header: true })}>Starts</th>
-                              <th scope="col"${buildTableCellAttributes(comparisonColumns[2], { header: true })}>Wins</th>
-                              <th scope="col"${buildTableCellAttributes(comparisonColumns[3], { header: true })}>Score</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            ${tracks
-                              .map(
-                                (t) => `
-                              <tr>
-                                <td${buildTableCellAttributes(comparisonColumns[0])}>${escapeHtml(t.track)}</td>
-                                <td${buildTableCellAttributes(comparisonColumns[1])}>${formatInteger(t.starts)}</td>
-                                <td${buildTableCellAttributes(comparisonColumns[2])}>${formatInteger(t.wins)}</td>
-                                <td${buildTableCellAttributes(comparisonColumns[3])}>${formatDecimal(t.trackScore)}</td>
-                              </tr>
-                            `,
-                              )
-                              .join("")}
-                          </tbody>
-                        </table>
+                        ${renderDataTable(comparisonColumns, tracks, {
+                          tableClassName: "data-table--compact",
+                          compact: true,
+                        })}
                       </div>`
                     : `<div class="subtle-text">No venue data available.</div>`
                 }
