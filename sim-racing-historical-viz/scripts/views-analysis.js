@@ -48,6 +48,7 @@ function renderDriversView(dataset) {
     const btn = e.target.closest("button[data-driver-view]");
     if (!btn) return;
     state.drivers.view = btn.dataset.driverView;
+    syncHistory();
     renderDriversView(dataset);
   });
 }
@@ -58,7 +59,9 @@ function renderDriverList(dataset, area) {
   `;
 
   const query = state.filters.driverSearch.trim().toLowerCase();
-  const records = dataset.careerRecords.filter((r) => !query || r.driver.toLowerCase().includes(query));
+  const records = sortDriversByName(
+    dataset.careerRecords.filter((r) => !query || r.driver.toLowerCase().includes(query)),
+  );
 
   area.innerHTML = records.length
     ? `<div class="driver-list">${records.map((r) => `
@@ -81,6 +84,7 @@ function renderDriverList(dataset, area) {
     const btn = e.target.closest("button[data-driver]");
     if (!btn) return;
     state.filters.profileDriver = btn.dataset.driver;
+    syncHistory();
     renderDriversView(dataset);
   });
 }
@@ -201,6 +205,7 @@ function bindDriverLinkClicks(container, dataset) {
     if (!link) return;
     e.preventDefault();
     state.filters.profileDriver = link.dataset.driver;
+    syncHistory();
     renderDriversView(dataset);
   });
 }
@@ -221,11 +226,7 @@ function renderDriverProfile(dataset) {
   const preset = getActivePreset();
 
   refs["drivers-title"].textContent = "";
-  refs["drivers-filters"].innerHTML = `
-    <select class="select" id="profile-preset-select">
-      ${Object.entries(PRESETS).map(([k, p]) => `<option value="${escapeHtml(k)}"${state.filters.preset === k ? " selected" : ""}>${escapeHtml(p.label)}</option>`).join("")}
-    </select>
-  `;
+  refs["drivers-filters"].innerHTML = "";
 
   refs["drivers-content"].innerHTML = `
     <div class="profile-header">
@@ -248,8 +249,13 @@ function renderDriverProfile(dataset) {
     ${aggregate ? `
     <div class="card mb-1">
       <div class="card__header">
-        <h3 class="card__title">Index Breakdown</h3>
-        <span class="badge">${escapeHtml(preset.label)} &middot; Score ${formatComposite(aggregate.composite)}</span>
+        <div>
+          <h3 class="card__title">Index Breakdown</h3>
+          <div class="card__subtitle">Score ${formatComposite(aggregate.composite)} &middot; ${escapeHtml(preset.description)}</div>
+        </div>
+        <div class="card__controls">
+          ${buildPresetControl("profile-preset-select")}
+        </div>
       </div>
       <div class="card__body">
         <div class="score-breakdown">
@@ -266,6 +272,7 @@ function renderDriverProfile(dataset) {
 
   document.getElementById("driver-back").addEventListener("click", () => {
     state.filters.profileDriver = "";
+    syncHistory({ replace: true });
     renderDriversView(dataset);
   });
 
@@ -419,13 +426,9 @@ function renderTrackPerformance(dataset, driver) {
 // ==================== COMPARE VIEW ====================
 
 function renderCompareView(dataset) {
-  const drivers = dataset.careerRecords.map((r) => r.driver);
+  const drivers = sortDriverNames(dataset.careerRecords.map((r) => r.driver));
 
-  refs["compare-filters"].innerHTML = `
-    <select class="select" id="compare-preset-select">
-      ${Object.entries(PRESETS).map(([k, p]) => `<option value="${escapeHtml(k)}"${state.filters.preset === k ? " selected" : ""}>${escapeHtml(p.label)}</option>`).join("")}
-    </select>
-  `;
+  refs["compare-filters"].innerHTML = "";
 
   const ranking = buildCareerAggregates(dataset);
   const selected = state.selectedDrivers
@@ -451,8 +454,13 @@ function renderCompareView(dataset) {
     ${selected.length ? `
     <div class="card mb-1">
       <div class="card__header">
-        <h3 class="card__title">Composite Comparison</h3>
-        <div class="card__subtitle">${escapeHtml(getActivePreset().description)}</div>
+        <div>
+          <h3 class="card__title">Composite Comparison</h3>
+          <div class="card__subtitle">${escapeHtml(getActivePreset().description)}</div>
+        </div>
+        <div class="card__controls">
+          ${buildPresetControl("compare-preset-select")}
+        </div>
       </div>
       <div class="card__body">
         <div class="comparison-grid">
@@ -700,6 +708,32 @@ function renderCompareWeightedScores(dataset) {
 
 function buildStatItem(value, label) {
   return `<div class="stat-item"><div class="stat-item__value">${escapeHtml(String(value))}</div><div class="stat-item__label">${escapeHtml(label)}</div></div>`;
+}
+
+function sortDriversByName(records) {
+  return [...records].sort((left, right) => compareDriverNames(left.driver, right.driver));
+}
+
+function sortDriverNames(names) {
+  return [...names].sort(compareDriverNames);
+}
+
+function compareDriverNames(left, right) {
+  return normalizeInlineText(left).localeCompare(normalizeInlineText(right), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function buildPresetControl(id) {
+  return `
+    <label class="inline-control" for="${escapeHtml(id)}">
+      <span>Bias</span>
+      <select class="select" id="${escapeHtml(id)}">
+        ${Object.entries(PRESETS).map(([k, p]) => `<option value="${escapeHtml(k)}"${state.filters.preset === k ? " selected" : ""}>${escapeHtml(p.label)}</option>`).join("")}
+      </select>
+    </label>
+  `;
 }
 
 function buildBarRow(label, rawValue, normalized, key) {

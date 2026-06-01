@@ -57,6 +57,7 @@ function handleSeasonGridClick(event) {
   const card = event.target.closest("button[data-season-id]");
   if (!card) return;
   state.filters.detailSeason = card.dataset.seasonId;
+  syncHistory();
   renderSeasonsView(state.dataset);
 }
 
@@ -101,12 +102,7 @@ function renderSeasonDetail(dataset) {
     return;
   }
 
-  refs["seasons-filters"].innerHTML = `
-    <select class="select" id="detail-progress-mode">
-      <option value="week"${state.filters.detailProgressMode === "week" ? " selected" : ""}>By race week</option>
-      <option value="race"${state.filters.detailProgressMode === "race" ? " selected" : ""}>By each race</option>
-    </select>
-  `;
+  refs["seasons-filters"].innerHTML = "";
   refs["seasons-header"].querySelector(".view-title").textContent = "";
 
   const wdcText = detail.wdcWinners?.length
@@ -154,16 +150,9 @@ function renderSeasonDetail(dataset) {
 
   document.getElementById("season-back").addEventListener("click", () => {
     state.filters.detailSeason = null;
+    syncHistory({ replace: true });
     renderSeasonsView(dataset);
   });
-
-  const modeSelect = document.getElementById("detail-progress-mode");
-  if (modeSelect) {
-    modeSelect.addEventListener("change", (e) => {
-      state.filters.detailProgressMode = e.target.value;
-      renderProgressChart(detail);
-    });
-  }
 
   renderProgressChart(detail);
   renderStandingsTable(detail);
@@ -186,7 +175,35 @@ function renderProgressChart(detail) {
     return;
   }
 
-  area.innerHTML = scopes.map((scope) => buildProgressChartHtml(detail, scope, mode)).join("");
+  area.innerHTML = `
+    <div class="card mb-1">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Championship Progression</h3>
+          <div class="card__subtitle">${escapeHtml(detail.seasonId)} position changes</div>
+        </div>
+        <div class="card__controls">
+          <label class="inline-control" for="detail-progress-mode">
+            <span>View</span>
+            <select class="select" id="detail-progress-mode">
+              <option value="week"${mode === "week" ? " selected" : ""}>By race week</option>
+              <option value="race"${mode === "race" ? " selected" : ""}>By each race</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="card__body">
+        <div class="chart-stack">
+          ${scopes.map((scope) => buildProgressChartHtml(detail, scope, mode)).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("detail-progress-mode")?.addEventListener("change", (e) => {
+    state.filters.detailProgressMode = e.target.value;
+    renderProgressChart(detail);
+  });
 }
 
 function buildSeasonProgressionScopes(detail, mode) {

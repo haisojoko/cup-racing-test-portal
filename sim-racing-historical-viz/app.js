@@ -116,6 +116,8 @@ const state = {
 };
 
 const refs = {};
+const ROUTE_TABS = ["seasons", "drivers", "compare", "teams"];
+let isApplyingHistory = false;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -129,7 +131,9 @@ function getActivePreset() {
 
 function init() {
   cacheRefs();
+  applyRouteFromLocation();
   bindEvents();
+  window.addEventListener("popstate", handlePopState);
   loadData();
 }
 
@@ -150,9 +154,110 @@ function bindEvents() {
     const button = event.target.closest("button[data-tab]");
     if (!button) return;
     state.activeTab = button.dataset.tab;
+    syncHistory();
     renderTabState();
     renderActiveView();
   });
+}
+
+function handlePopState() {
+  isApplyingHistory = true;
+  applyRouteFromLocation();
+  render();
+  isApplyingHistory = false;
+}
+
+function applyRouteFromLocation() {
+  const route = parseRouteHash(window.location.hash);
+  state.activeTab = route.activeTab;
+
+  if (route.activeTab === "seasons") {
+    state.filters.detailSeason = route.detailSeason || null;
+  }
+
+  if (route.activeTab === "drivers") {
+    state.filters.profileDriver = route.profileDriver || "";
+    state.drivers.view = route.driverView || "list";
+  }
+
+  if (route.activeTab === "teams") {
+    state.teams.view = route.teamView || "totals";
+  }
+}
+
+function parseRouteHash(hash) {
+  const raw = String(hash || "").replace(/^#/, "");
+  if (!raw) return { activeTab: "seasons", detailSeason: null };
+
+  const parts = raw.split("/").filter(Boolean).map(decodeRouteSegment);
+  const activeTab = ROUTE_TABS.includes(parts[0]) ? parts[0] : "seasons";
+
+  if (activeTab === "seasons") {
+    return { activeTab, detailSeason: parts[1] || null };
+  }
+
+  if (activeTab === "drivers") {
+    const driverViews = ["list", "allDrivers", "weightedScores", "cpiRankings"];
+    if (parts[1] === "profile" && parts[2]) {
+      return { activeTab, profileDriver: parts.slice(2).join("/"), driverView: "list" };
+    }
+    return {
+      activeTab,
+      profileDriver: "",
+      driverView: driverViews.includes(parts[1]) ? parts[1] : "list",
+    };
+  }
+
+  if (activeTab === "teams") {
+    const teamViews = ["totals", "profile", "compare", "history"];
+    return { activeTab, teamView: teamViews.includes(parts[1]) ? parts[1] : "totals" };
+  }
+
+  return { activeTab };
+}
+
+function syncHistory(options = {}) {
+  if (isApplyingHistory) return;
+
+  const hash = buildRouteHash();
+  const method = options.replace ? "replaceState" : "pushState";
+  if (!options.replace && window.location.hash === hash) return;
+
+  window.history[method]({ appRoute: true, hash }, "", hash);
+}
+
+function buildRouteHash() {
+  if (state.activeTab === "seasons") {
+    return state.filters.detailSeason
+      ? `#seasons/${encodeRouteSegment(state.filters.detailSeason)}`
+      : "#seasons";
+  }
+
+  if (state.activeTab === "drivers") {
+    if (state.filters.profileDriver) {
+      return `#drivers/profile/${encodeRouteSegment(state.filters.profileDriver)}`;
+    }
+    return `#drivers/${encodeRouteSegment(state.drivers.view || "list")}`;
+  }
+
+  if (state.activeTab === "teams") {
+    return `#teams/${encodeRouteSegment(state.teams.view || "totals")}`;
+  }
+
+  if (state.activeTab === "compare") return "#compare";
+  return "#seasons";
+}
+
+function encodeRouteSegment(value) {
+  return encodeURIComponent(String(value || ""));
+}
+
+function decodeRouteSegment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function loadData() {
@@ -169,6 +274,7 @@ function loadData() {
       state.trackAggregateCache = buildTrackAggregates(dataset);
       initDefaults(dataset);
       refs["loading-state"].hidden = true;
+      syncHistory({ replace: true });
       render();
     })
     .catch(function (err) {
@@ -195,18 +301,11 @@ function fetchAndParse(url) {
 function initDefaults(dataset) {
   const drivers = dataset.filterOptions.drivers.map((e) => e.value);
   if (drivers.length) {
-    state.filters.profileDriver = drivers[0];
     const preferred = DEFAULT_COMPARE_DRIVERS.filter((d) => drivers.includes(d));
     const rest = dataset.careerRecords
       .map((r) => r.driver)
       .filter((d) => drivers.includes(d) && !preferred.includes(d));
     state.selectedDrivers = [...preferred, ...rest].slice(0, 2);
-  }
-  const completedSeasons = dataset.seasonDetails
-    .filter((d) => !d.isUpcoming)
-    .sort((a, b) => getSeasonOrder(a.seasonId) - getSeasonOrder(b.seasonId));
-  if (completedSeasons.length) {
-    state.filters.detailSeason = completedSeasons[completedSeasons.length - 1].seasonId;
   }
 }
 
