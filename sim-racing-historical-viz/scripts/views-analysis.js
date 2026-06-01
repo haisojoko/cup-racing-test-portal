@@ -479,11 +479,21 @@ function renderCompareView(dataset) {
       </div>
     </div>
 
-    <div class="card">
+    <div class="card mb-1">
       <div class="card__header">
         <h3 class="card__title">Top Tracks</h3>
       </div>
       <div class="card__body" id="compare-top-tracks"></div>
+    </div>
+
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">All Weighted Scores</h3>
+        <span class="badge" id="compare-ws-count"></span>
+      </div>
+      <div class="card__body">
+        <div id="compare-ws-table"></div>
+      </div>
     </div>
     ` : renderEmptyStateMarkup("Select drivers above to compare.")}
   `;
@@ -491,6 +501,7 @@ function renderCompareView(dataset) {
   if (selected.length) {
     renderCompareArcChart(dataset);
     renderCompareTopTracks(dataset);
+    renderCompareWeightedScores(dataset);
   }
 
   document.getElementById("compare-picker")?.addEventListener("click", (e) => {
@@ -650,6 +661,39 @@ function renderCompareTopTracks(dataset) {
       }).join("")}
     </div>
   `;
+}
+
+function renderCompareWeightedScores(dataset) {
+  const area = document.getElementById("compare-ws-table");
+  const badge = document.getElementById("compare-ws-count");
+  if (!area) return;
+
+  const records = dataset.weightedRecords
+    .filter((r) => !r.isUpcoming && state.selectedDrivers.includes(r.driver));
+
+  if (badge) badge.textContent = records.length + " records";
+
+  if (!records.length) {
+    area.innerHTML = renderEmptyStateMarkup("No weighted score records for the selected drivers.");
+    return;
+  }
+
+  const columns = [
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 10, className: "wrap-col" },
+    { key: "seasonId", label: "Season", strong: true },
+    { key: "weightedScore", label: "W.Score", className: "num-col", render: (r) => formatDecimal(r.weightedScore) },
+    { key: "winRate", label: "Win%", format: "percent", className: "num-col" },
+    { key: "podiumRate", label: "Pod%", format: "percent", className: "num-col" },
+    { key: "top5Rate", label: "Top 5%", format: "percent", className: "num-col" },
+    { key: "pointsPerRace", label: "Pts/Race", className: "num-col", render: (r) => formatDecimal(r.pointsPerRace, 1), sortValue: (r) => r.pointsPerRace },
+    { key: "fastestLapRate", label: "FL%", format: "percent", className: "num-col" },
+    { key: "poleRate", label: "Pole%", format: "percent", className: "num-col" },
+    { key: "pointsRate", label: "Pts Rate", format: "percent", className: "num-col" },
+    { key: "wdc", label: "WDC", render: (r) => r.wdc ? "Yes" : "-" },
+    { key: "wcc", label: "WCC", render: (r) => r.wcc ? "Yes" : "-" },
+  ];
+
+  renderSortableTable("compare-ws-table", columns, records);
 }
 
 // ==================== SHARED HELPERS ====================
