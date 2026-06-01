@@ -1,0 +1,12 @@
+{
+  "name": "cup-racing-data",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Season stats, driver profiles, and comparisons for the Cup Racing league.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.1"
+  }
+}
