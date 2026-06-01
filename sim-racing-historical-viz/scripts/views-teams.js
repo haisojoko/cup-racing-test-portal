@@ -54,6 +54,7 @@ function renderTeamsView(dataset) {
     const btn = e.target.closest("button[data-team-view]");
     if (!btn) return;
     state.teams.view = btn.dataset.teamView;
+    syncHistory();
     renderTeamsView(dataset);
   });
 
