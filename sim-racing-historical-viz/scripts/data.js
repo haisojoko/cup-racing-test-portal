@@ -54,7 +54,7 @@ function parseDataset(name, rawMarkdown, source) {
   dataset.seasonCatalog = registryRows.map((row) => {
     const seasonId = normalizeSeasonId(row.Season);
     const wdcWinners = parseWinnerList(row.WDC);
-    const wccTeam = normalizeInlineText(row.WCC);
+    const wccTeam = normalizeTeamName(row.WCC);
     const isUpcoming = /tbd/i.test(row.WDC || "") || /tbd/i.test(row.WCC || "");
     return {
       seasonId,
@@ -93,7 +93,7 @@ function parseDataset(name, rawMarkdown, source) {
     const meta = parseSeasonMetaBlock(block.lines);
     const teamRows = extractTableRowsAfterHeading(block.lines, /^### Team Standings \(WCC\)$/);
     const parsedTeamStandings = teamRows.map((row) => ({
-      teamName: normalizeInlineText(row.Team),
+      teamName: normalizeTeamName(row.Team),
       points: parseNumberish(row.Points),
       rawPoints: normalizeInlineText(row.Points),
       members: parseTeamMembers(row.Team),
@@ -509,7 +509,7 @@ function parseSeasonMetaBlock(blockLines) {
       meta.wdcWinners = parseWinnerList(value);
     }
     if (key === "wcc") {
-      meta.wccTeam = value;
+      meta.wccTeam = normalizeTeamName(value);
     }
   });
 
@@ -536,7 +536,7 @@ function normalizeDivisionLabel(value) {
 function buildTeamAssignments(teamRows) {
   const assignments = {};
   teamRows.forEach((row) => {
-    const teamName = normalizeInlineText(row.teamName || row.Team);
+    const teamName = normalizeTeamName(row.teamName || row.Team);
     parseTeamMembers(teamName).forEach((driver) => {
       assignments[driver] = teamName;
     });
@@ -951,6 +951,12 @@ function parseWinnerList(value) {
       };
     })
     .filter((entry) => entry.name);
+}
+
+function normalizeTeamName(teamName) {
+  const members = parseTeamMembers(teamName);
+  if (!members.length) return normalizeInlineText(teamName);
+  return [...members].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })).join(" + ");
 }
 
 function parseTeamMembers(teamName) {
@@ -1944,4 +1950,19 @@ function maxOf(items, getter) {
     return 0;
   }
   return items.reduce((max, item) => Math.max(max, getter(item) || 0), 0);
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    parseDataset, normalizeSeasonId, getSeasonOrder, sortBySeason,
+    normalizeInlineText, normalizeMarkdown, parseMarkdownTable,
+    parseDriverCell, parseTeamMembers, normalizeTeamName, parseNumberish,
+    parseDecimal, parsePercent, buildEraLabel, splitCsvLike, parseWinnerList,
+    groupBy, uniqueList, createLookup, deriveRate, deriveAverage,
+    averageOf, sumOf, maxOf, normalizeAgainstMax,
+    buildTrackAggregates, applyBayesianShrinkage,
+    getFilteredSeasonRecords, buildCareerAggregates, buildSeasonRanking,
+    buildTeamAggregates, buildWccHistoryRows,
+    isPlaceholderValue, normalizeCarSpec, makeSeasonDriverKey,
+  };
 }

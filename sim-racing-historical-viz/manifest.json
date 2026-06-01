@@ -1,11 +1,11 @@
 {
-  "name": "Slipstream Archive Lab",
-  "short_name": "Slipstream",
-  "description": "Historical sim racing analysis workspace for Markdown season archives.",
+  "name": "Cup Racing Data",
+  "short_name": "Cup Racing",
+  "description": "Season stats, driver profiles, and head-to-head comparisons for the Cup Racing league.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f2efe8",
-  "theme_color": "#f2efe8",
+  "background_color": "#f8f9fa",
+  "theme_color": "#1a1a2e",
   "icons": [
     {
       "src": "favicon.svg",
