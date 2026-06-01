@@ -196,6 +196,11 @@ button, input, select, textarea { font: inherit; }
   justify-content: space-between;
   padding: 1rem 1.25rem;
   gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.card__header > div:first-child {
+  min-width: 0;
 }
 
 .card__title {
@@ -212,6 +217,14 @@ button, input, select, textarea { font: inherit; }
 
 .card__body {
   padding: 0 1.25rem 1.25rem;
+}
+
+.card__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 /* ---- Season Card Grid ---- */
@@ -798,6 +811,24 @@ button, input, select, textarea { font: inherit; }
 
 .search-input::placeholder { color: var(--text-muted); }
 
+.inline-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.inline-control span {
+  letter-spacing: 0;
+}
+
+.inline-control .select {
+  min-width: 9.5rem;
+}
+
 /* ---- Buttons ---- */
 .btn {
   display: inline-flex;
@@ -940,6 +971,10 @@ button, input, select, textarea { font: inherit; }
   height: auto;
 }
 
+.chart-stack > .chart-container:last-child {
+  margin-bottom: 0;
+}
+
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1064,6 +1099,20 @@ button, input, select, textarea { font: inherit; }
   .view-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .card__controls,
+  .inline-control {
+    width: 100%;
+  }
+
+  .inline-control {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .inline-control .select {
+    width: 100%;
   }
 
   .season-grid {
