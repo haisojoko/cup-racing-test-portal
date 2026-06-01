@@ -1,4 +1,4 @@
-const CACHE = "slipstream-v4";
+const CACHE = "cupracingdata-v1";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -28,7 +28,6 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Same-origin app shell uses network-first for faster updates; remote data stays uncached.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
     return;
@@ -36,7 +35,6 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
 
-  // Let the remote archive fetch go straight to network (no caching — data may update).
   if (url.hostname === "raw.githubusercontent.com") {
     return;
   }
