@@ -2,3 +2,8 @@ CLAUDE.md
 README.md
 wrangler.toml
 .assetsignore
+node_modules
+package.json
+package-lock.json
+vitest.config.js
+tests
