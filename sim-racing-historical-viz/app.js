@@ -156,38 +156,39 @@ function bindEvents() {
 }
 
 function loadData() {
-  const urls = [
-    "data/Cup_Racing_Complete_Data.md",
-    "https://raw.githubusercontent.com/haisojoko/cup-racing-test-portal/refs/heads/main/sim-racing-historical-viz/data/Cup_Racing_Complete_Data.md",
-  ];
+  var localUrl = "data/Cup_Racing_Complete_Data.md";
+  var remoteUrl = "https://raw.githubusercontent.com/haisojoko/cup-racing-test-portal/refs/heads/main/sim-racing-historical-viz/data/Cup_Racing_Complete_Data.md";
 
-  tryFetchChain(urls, 0);
-}
-
-function tryFetchChain(urls, index) {
-  if (index >= urls.length) {
-    refs["loading-state"].innerHTML = `
-      <p style="color:var(--danger)">Failed to load data.</p>
-      <p class="subtle-text">If opening index.html directly, try serving via a local server:<br><code>python3 -m http.server</code></p>
-    `;
-    return;
-  }
-
-  fetch(urls[index])
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.text();
+  fetchAndParse(localUrl)
+    .catch(function (localErr) {
+      console.warn("Local fetch failed:", localErr.message, "— trying remote…");
+      return fetchAndParse(remoteUrl);
     })
-    .then((text) => {
-      const dataset = parseDataset("Cup_Racing_Complete_Data.md", text, "local");
+    .then(function (dataset) {
       state.dataset = dataset;
       state.trackAggregateCache = buildTrackAggregates(dataset);
       initDefaults(dataset);
       refs["loading-state"].hidden = true;
       render();
     })
-    .catch(() => {
-      tryFetchChain(urls, index + 1);
+    .catch(function (err) {
+      console.error("Cup Racing Data load failed:", err);
+      refs["loading-state"].innerHTML =
+        '<p style="color:var(--danger)">Failed to load data: ' + escapeHtml(err.message) + "</p>" +
+        '<p class="subtle-text">Check the browser console for details. ' +
+        "If opening index.html directly, serve via a local server.</p>";
+    });
+}
+
+function fetchAndParse(url) {
+  return fetch(url)
+    .then(function (res) {
+      if (!res.ok) throw new Error("Fetch " + url + " returned HTTP " + res.status);
+      return res.text();
+    })
+    .then(function (text) {
+      if (!text || text.length < 100) throw new Error("Response from " + url + " was empty or too short (" + text.length + " chars)");
+      return parseDataset("Cup_Racing_Complete_Data.md", text, "auto");
     });
 }
 
