@@ -366,6 +366,72 @@ Win% x 0.20 + Podium% x 0.20
 | 4 | Toby | S1 | 0.4000 | 11.1% | 33.3% | 55.6% | 14.0 | 11.1% | 0% | 60.0% | 100.0% | | Yes |
 `;
 
+  const NON_STARTERS_MD = `# Test League
+
+## Season Registry
+
+| Season | Type | Car | Venues | Races/Venue | WDC | WCC |
+| --- | --- | --- | --- | --- | --- | --- |
+| S1 | Formula | Tatuus FA01 | Spa | 3 | Josie | Josie + Toby |
+
+## Weighted Score Formula
+
+Win% x 0.20 + Podium% x 0.20
+
+## Full Career Statistics
+
+| Driver | WDC | WCC | Wins | Podiums | Poles | FLs | Points | Races | Win% | Pod% | Pts/Race | FL% | Top5 | Top5% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Josie | 1 | 1 | 2 | 3 | 1 | 1 | 68 | 3 | 66.7% | 100.0% | 22.7 | 33.3% | 3 | 100.0% |
+| Toby | 0 | 1 | 0 | 1 | 0 | 0 | 15 | 1 | 0.0% | 100.0% | 15.0 | 0.0% | 1 | 100.0% |
+| Ghost | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0% | 0.0% | 0.0 | 0.0% | 0 | 0.0% |
+
+## CPI Rankings
+
+| Rank | Driver | CPI | Avg WS | Peak WS | Avg Pts Rate | Avg Top5 Rate | WDCs | WCCs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie | 1.400 | 0.700 | 0.900 | 80.0% | 77.8% | 1 | 1 |
+| 2 | Toby | 1.200 | 0.600 | 0.800 | 70.0% | 66.7% | 0 | 1 |
+
+## All-Time Weighted Score Rankings
+
+| Rank | Driver | Season | W.Score | Win% | Pod% | Top5% | Pts/Race | FL% | Pole% | PtsRate | Part. | WDC | WCC |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie | S1 | 0.9000 | 66.7% | 100.0% | 100.0% | 22.7 | 33.3% | 33.3% | 90.0% | 100.0% | Yes | Yes |
+| 2 | Toby | S1 | 0.4000 | 0.0% | 100.0% | 100.0% | 15.0 | 0.0% | 0.0% | 60.0% | 33.3% | | Yes |
+
+## Season 1 Results
+
+**Type:** Formula
+**Car:** Tatuus FA01
+**Venues:** Spa
+**Races Per Venue:** 3
+**WDC:** Josie
+**WCC:** Josie + Toby
+
+### Season Standings
+
+| Pos | Driver | Points | Wins | Podiums | Poles | FLs | Races | Part. | Pts Rate | Top 5 Rate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie **WDC** (WCC) | 68 | 2 | 3 | 1 | 1 | 3 | 100.0% | 90.0% | 100.0% |
+| 2 | Toby (WCC) | 15 | 0 | 1 | 0 | 0 | 1 | 33.3% | 60.0% | 100.0% |
+| 3 | Ghost | 0 | 0 | 0 | 0 | 0 | 0 | 0.0% | 0.0% | 0.0% |
+
+### Team Standings (WCC)
+
+| Team | Points |
+| --- | --- |
+| Josie + Toby | 83 |
+
+#### Venue 1: Spa
+
+| Driver | R1 Pos | R1 Pts | R2 Pos | R2 Pts | R3 Pos | R3 Pts | Day Total |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Josie | 1 | 25 | 2 | 18 | 1 | 25 | 68 |
+| Toby | DNS | 0 | 3 | 15 | DNS | 0 | 15 |
+| Ghost | DNS | 0 | DNS | 0 | DNS | 0 | 0 |
+`;
+
   it("parses without throwing", () => {
     expect(() => parseDataset("test.md", MINIMAL_MD, "test")).not.toThrow();
   });
@@ -406,6 +472,23 @@ Win% x 0.20 + Podium% x 0.20
   it("throws on missing weighted score table", () => {
     const broken = "# Test\n## Season Registry\n| Season | Type | Car | Venues | Races/Venue | WDC | WCC |\n| --- | --- | --- | --- | --- | --- | --- |\n| S1 | F | car | venue | 3 | X | Y |\n";
     expect(() => parseDataset("bad.md", broken, "test")).toThrow();
+  });
+
+  it("omits season standings rows when the driver has zero starts", () => {
+    const ds = parseDataset("non-starters.md", NON_STARTERS_MD, "test");
+    const detail = ds.seasonDetails.find((season) => season.seasonId === "S1");
+
+    expect(detail.standings.map((row) => row.driver)).toEqual(["Josie", "Toby"]);
+    expect(ds.seasonStandings.some((row) => row.driver === "Ghost")).toBe(false);
+  });
+
+  it("omits venue rows only when every race in the round is DNS", () => {
+    const ds = parseDataset("non-starters.md", NON_STARTERS_MD, "test");
+    const detail = ds.seasonDetails.find((season) => season.seasonId === "S1");
+    const rows = detail.venues[0].rows;
+
+    expect(rows.map((row) => row.driver)).toEqual(["Josie", "Toby"]);
+    expect(rows.find((row) => row.driver === "Toby").races.some((race) => race.position === "DNS")).toBe(true);
   });
 });
 

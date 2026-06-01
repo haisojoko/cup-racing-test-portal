@@ -103,42 +103,44 @@ function parseDataset(name, rawMarkdown, source) {
     const driverContext = buildSeasonDriverContext(venueBlocks, teamAssignments);
     const standingsRows = extractTableRowsAfterHeading(block.lines, /^### Season Standings$/);
 
-    const parsedStandings = standingsRows.map((row) => {
-      const driverInfo = parseDriverCell(row.Driver);
-      const driverMeta = driverContext[driverInfo.name] || {};
-      return {
-        seasonId: block.seasonId,
-        seasonLabel: block.seasonId,
-        seasonOrder: getSeasonOrder(block.seasonId),
-        eraLabel: buildEraLabel(block.seasonId),
-        rankLabel: normalizeInlineText(row.Pos),
-        driver: driverInfo.name,
-        points: parseNumberish(row.Points),
-        wins: parseNumberish(row.Wins),
-        podiums: parseNumberish(row.Podiums),
-        poles: parseNumberish(row.Poles),
-        fastestLaps: parseNumberish(row.FLs),
-        races: parseNumberish(row.Races),
-        participationRate: parsePercent(row["Part."]),
-        pointsRate: parsePercent(row["Pts Rate"]),
-        top5Rate: parsePercent(row["Top 5 Rate"]),
-        wdc: driverInfo.wdc,
-        wcc: driverInfo.wcc,
-        teamName: driverMeta.teamName || teamAssignments[driverInfo.name] || "",
-        className:
-          driverMeta.className ||
-          inferClassFromWinnerLabels(driverInfo.name, meta.wdcWinners) ||
-          "",
-        primaryCar: driverMeta.primaryCar || "",
-        type: meta.type,
-        car: meta.car,
-        venues: meta.venues,
-        racesPerVenue: meta.racesPerVenue,
-        wdcWinners: meta.wdcWinners,
-        wccTeam: meta.wccTeam,
-        isMultiClass: meta.isMultiClass,
-      };
-    });
+    const parsedStandings = standingsRows
+      .map((row) => {
+        const driverInfo = parseDriverCell(row.Driver);
+        const driverMeta = driverContext[driverInfo.name] || {};
+        return {
+          seasonId: block.seasonId,
+          seasonLabel: block.seasonId,
+          seasonOrder: getSeasonOrder(block.seasonId),
+          eraLabel: buildEraLabel(block.seasonId),
+          rankLabel: normalizeInlineText(row.Pos),
+          driver: driverInfo.name,
+          points: parseNumberish(row.Points),
+          wins: parseNumberish(row.Wins),
+          podiums: parseNumberish(row.Podiums),
+          poles: parseNumberish(row.Poles),
+          fastestLaps: parseNumberish(row.FLs),
+          races: parseNumberish(row.Races),
+          participationRate: parsePercent(row["Part."]),
+          pointsRate: parsePercent(row["Pts Rate"]),
+          top5Rate: parsePercent(row["Top 5 Rate"]),
+          wdc: driverInfo.wdc,
+          wcc: driverInfo.wcc,
+          teamName: driverMeta.teamName || teamAssignments[driverInfo.name] || "",
+          className:
+            driverMeta.className ||
+            inferClassFromWinnerLabels(driverInfo.name, meta.wdcWinners) ||
+            "",
+          primaryCar: driverMeta.primaryCar || "",
+          type: meta.type,
+          car: meta.car,
+          venues: meta.venues,
+          racesPerVenue: meta.racesPerVenue,
+          wdcWinners: meta.wdcWinners,
+          wccTeam: meta.wccTeam,
+          isMultiClass: meta.isMultiClass,
+        };
+      })
+      .filter(hasSeasonStarts);
 
     const seasonDetail = {
       seasonId: block.seasonId,
@@ -601,23 +603,37 @@ function extractFirstTableRows(lines) {
 // Venue rows preserve per-race results as well as the day-total checkpoint used in progression.
 function parseVenueRows(rows, seasonMeta) {
   const raceColumns = extractRaceColumns(rows[0] || {});
-  return rows.map((row) => {
-    const driver = normalizeInlineText(row.Driver);
-    const carModel = normalizeInlineText(row.Car || "");
-    return {
-      driver,
-      carModel,
-      className: inferClassFromCar(carModel, seasonMeta),
-      dayTotal: parseNumberish(row["Day Total"]),
-      raw: row,
-      races: raceColumns.map((column) => ({
-        number: column.number,
-        position: normalizeInlineText(row[column.posKey] || ""),
-        points: parseNumberish(row[column.ptsKey]),
-        rawPoints: normalizeInlineText(row[column.ptsKey] || ""),
-      })),
-    };
-  });
+  return rows
+    .map((row) => {
+      const driver = normalizeInlineText(row.Driver);
+      const carModel = normalizeInlineText(row.Car || "");
+      return {
+        driver,
+        carModel,
+        className: inferClassFromCar(carModel, seasonMeta),
+        dayTotal: parseNumberish(row["Day Total"]),
+        raw: row,
+        races: raceColumns.map((column) => ({
+          number: column.number,
+          position: normalizeInlineText(row[column.posKey] || ""),
+          points: parseNumberish(row[column.ptsKey]),
+          rawPoints: normalizeInlineText(row[column.ptsKey] || ""),
+        })),
+      };
+    })
+    .filter(hasVenueStart);
+}
+
+function hasSeasonStarts(standing) {
+  return standing.races == null || standing.races > 0;
+}
+
+function hasVenueStart(row) {
+  return !row.races.length || row.races.some((race) => !isDnsResult(race));
+}
+
+function isDnsResult(race) {
+  return /^dns$/i.test(normalizeInlineText(race.position));
 }
 
 // Detect repeating "R1 Pos / R1 Pts" style column pairs so venue tables can be generalized.
