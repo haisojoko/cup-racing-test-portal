@@ -242,6 +242,12 @@ function renderDriverProfile(dataset) {
       ${buildStatItem(formatInteger(career.podiums), "Podiums")}
       ${buildStatItem(formatInteger(career.poles), "Poles")}
       ${buildStatItem(formatInteger(career.races), "Races")}
+      ${buildStatItem(formatPercent(career.winRate), "Win Rate")}
+      ${buildStatItem(formatPercent(career.podiumRate), "Podium Rate")}
+      ${buildStatItem(formatPercent(career.top5Rate), "Top 5 Rate")}
+      ${buildStatItem(formatPercent(career.poleRate), "Pole Rate")}
+      ${buildStatItem(formatPercent(career.fastestLapRate), "FL Rate")}
+      ${buildStatItem(formatDecimal(career.pointsPerRace, 1), "Pts / Race")}
       ${buildStatItem(career.bestSeasonId || "n/a", "Peak Season")}
       ${buildStatItem(formatDecimal(career.bestSeasonScore), "Peak WS")}
     </div>
@@ -267,7 +273,8 @@ function renderDriverProfile(dataset) {
 
     <div id="profile-fingerprints" class="mb-1"></div>
     <div id="profile-what-changed" class="mb-1"></div>
-    <div id="profile-tracks"></div>
+    <div id="profile-tracks" class="mb-1"></div>
+    <div id="profile-weighted-scores"></div>
   `;
 
   document.getElementById("driver-back").addEventListener("click", () => {
@@ -284,6 +291,7 @@ function renderDriverProfile(dataset) {
   renderFingerprints(dataset, driver);
   renderWhatChanged(dataset, driver);
   renderTrackPerformance(dataset, driver);
+  renderProfileWeightedScores(dataset, driver);
 }
 
 function renderFingerprints(dataset, driver) {
@@ -373,13 +381,18 @@ function buildDeltaLine(label, next, prev, isPct) {
   return `<div class="bar-row"><div class="bar-row__label"><span>${escapeHtml(label)}</span><span>${escapeHtml(prevT)} &rarr; ${escapeHtml(nextT)} (${d >= 0 ? "+" : ""}${isPct ? formatDecimal(d, 1) + "%" : formatDecimal(d, 3)})</span></div></div>`;
 }
 
+const TRACK_LIMIT_OPTIONS = [5, 10, 15, 20, "all"];
+
 function renderTrackPerformance(dataset, driver) {
   const area = document.getElementById("profile-tracks");
   if (!area) return;
 
   const cache = state.trackAggregateCache;
-  const tracks = getDriverTrackProfile(dataset, driver, cache, 15);
-  if (!tracks.length) { area.innerHTML = ""; return; }
+  const allTracks = getDriverTrackProfile(dataset, driver, cache, Infinity);
+  if (!allTracks.length) { area.innerHTML = ""; return; }
+
+  const limit = state.drivers.trackLimit;
+  const tracks = limit === "all" ? allTracks : allTracks.slice(0, limit);
 
   const maxScore = tracks.reduce((best, t) => Math.max(best, t.trackScore || 0), 0);
   const columns = [
@@ -404,7 +417,20 @@ function renderTrackPerformance(dataset, driver) {
     <div class="card">
       <div class="card__header">
         <h3 class="card__title">Track Performance</h3>
-        <span class="badge">${tracks.length} tracks</span>
+        <div class="card__controls">
+          <label class="inline-control" for="track-limit-select">
+            <span>Show</span>
+            <select class="select" id="track-limit-select">
+              ${TRACK_LIMIT_OPTIONS.map((opt) => {
+                const value = String(opt);
+                const label = opt === "all" ? "All" : `Top ${opt}`;
+                const selected = state.drivers.trackLimit === opt ? " selected" : "";
+                return `<option value="${value}"${selected}>${label}</option>`;
+              }).join("")}
+            </select>
+          </label>
+          <span class="badge">${allTracks.length} tracks</span>
+        </div>
       </div>
       <div class="card__body">
         <div class="table-wrap">
@@ -421,6 +447,54 @@ function renderTrackPerformance(dataset, driver) {
       </div>
     </div>
   `;
+
+  document.getElementById("track-limit-select")?.addEventListener("change", (e) => {
+    const raw = e.target.value;
+    state.drivers.trackLimit = raw === "all" ? "all" : Number(raw);
+    renderTrackPerformance(dataset, driver);
+  });
+}
+
+function renderProfileWeightedScores(dataset, driver) {
+  const area = document.getElementById("profile-weighted-scores");
+  if (!area) return;
+
+  const records = dataset.weightedRecords.filter(
+    (r) => r.driver === driver && !r.isUpcoming
+  );
+  if (!records.length) { area.innerHTML = ""; return; }
+
+  const columns = [
+    { key: "seasonId", label: "Season", strong: true, sticky: true, stickyWidthRem: 6,
+      sortValue: (r) => getSeasonOrder(r.seasonId) },
+    { key: "car", label: "Car", className: "wrap-col", widthRem: 10 },
+    { key: "weightedScore", label: "W.Score", className: "num-col", render: (r) => formatDecimal(r.weightedScore) },
+    { key: "winRate", label: "Win%", format: "percent", className: "num-col" },
+    { key: "podiumRate", label: "Pod%", format: "percent", className: "num-col" },
+    { key: "top5Rate", label: "Top 5%", format: "percent", className: "num-col" },
+    { key: "pointsPerRace", label: "Pts/Race", className: "num-col", render: (r) => formatDecimal(r.pointsPerRace, 1) },
+    { key: "fastestLapRate", label: "FL%", format: "percent", className: "num-col" },
+    { key: "poleRate", label: "Pole%", format: "percent", className: "num-col" },
+    { key: "pointsRate", label: "Pts Rate", format: "percent", className: "num-col" },
+    { key: "wdc", label: "WDC", render: (r) => r.wdc ? "Yes" : "-" },
+    { key: "wcc", label: "WCC", render: (r) => r.wcc ? "Yes" : "-" },
+  ];
+
+  const sorted = sortBySeason(records);
+
+  area.innerHTML = `
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">All Weighted Scores</h3>
+        <span class="badge">${records.length} seasons</span>
+      </div>
+      <div class="card__body">
+        <div id="profile-ws-table"></div>
+      </div>
+    </div>
+  `;
+
+  renderSortableTable("profile-ws-table", columns, sorted);
 }
 
 // ==================== COMPARE VIEW ====================

@@ -103,6 +103,7 @@ const state = {
   },
   drivers: {
     view: "list",
+    trackLimit: 10,
   },
   selectedDrivers: [],
   teams: {
