@@ -946,6 +946,45 @@ button, input, select, textarea { font: inherit; }
 .data-table--compact th { padding: 0.35rem 0.6rem; }
 .data-table--compact td { padding: 0.35rem 0.6rem; }
 
+.compare-matrix { min-width: 0; }
+
+.compare-matrix thead th.num-col,
+.compare-matrix tbody td.num-col {
+  text-align: right;
+}
+
+.compare-matrix .compare-matrix__stat {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  text-transform: none;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.compare-matrix tbody tr:hover .compare-matrix__stat {
+  background: #edf2ff;
+}
+
+.compare-matrix__driver {
+  border-bottom: 2px solid transparent;
+  padding-bottom: 0.1rem;
+  color: var(--text);
+}
+
+.compare-matrix td.is-leader {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.compare-matrix tbody tr:hover td.is-leader {
+  background: rgba(13, 110, 253, 0.16);
+}
+
 .driver-link {
   color: var(--accent);
   cursor: pointer;
