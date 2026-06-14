@@ -563,6 +563,14 @@ function renderCompareView(dataset) {
 
     <div class="card mb-1">
       <div class="card__header">
+        <h3 class="card__title">Career Totals</h3>
+        <div class="card__subtitle">Leader in each stat is highlighted.</div>
+      </div>
+      <div class="card__body" id="compare-totals"></div>
+    </div>
+
+    <div class="card mb-1">
+      <div class="card__header">
         <h3 class="card__title">Top Tracks</h3>
       </div>
       <div class="card__body" id="compare-top-tracks"></div>
@@ -581,6 +589,7 @@ function renderCompareView(dataset) {
   `;
 
   if (selected.length) {
+    renderCompareTotals(dataset);
     renderCompareArcChart(dataset);
     renderCompareTopTracks(dataset);
     renderCompareWeightedScores(dataset);
@@ -711,6 +720,73 @@ function renderCompareArcChart(dataset) {
     </svg>
     <div class="chart-legend">
       ${state.selectedDrivers.map((d) => `<span class="legend-item"><span class="legend-swatch" style="background:${colorForDriver(d)}"></span>${escapeHtml(d)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderCompareTotals(dataset) {
+  const area = document.getElementById("compare-totals");
+  if (!area) return;
+
+  const careers = state.selectedDrivers
+    .map((d) => dataset.careerRecords.find((r) => r.driver === d))
+    .filter(Boolean);
+
+  if (!careers.length) {
+    area.innerHTML = renderEmptyStateMarkup("No career data for the selected drivers.");
+    return;
+  }
+
+  // higherBetter governs which value gets the leader highlight per row.
+  const rows = [
+    { key: "points", label: "Points", format: (v) => formatInteger(v) },
+    { key: "wins", label: "Wins", format: (v) => formatInteger(v) },
+    { key: "podiums", label: "Podiums", format: (v) => formatInteger(v) },
+    { key: "poles", label: "Poles", format: (v) => formatInteger(v) },
+    { key: "fastestLaps", label: "Fastest Laps", format: (v) => formatInteger(v) },
+    { key: "races", label: "Races", format: (v) => formatInteger(v) },
+    { key: "wdc", label: "WDC", format: (v) => formatInteger(v) },
+    { key: "wcc", label: "WCC", format: (v) => formatInteger(v) },
+    { key: "winRate", label: "Win Rate", format: (v) => formatPercent(v) },
+    { key: "podiumRate", label: "Podium Rate", format: (v) => formatPercent(v) },
+    { key: "top5Rate", label: "Top 5 Rate", format: (v) => formatPercent(v) },
+    { key: "poleRate", label: "Pole Rate", format: (v) => formatPercent(v) },
+    { key: "fastestLapRate", label: "FL Rate", format: (v) => formatPercent(v) },
+    { key: "pointsPerRace", label: "Pts / Race", format: (v) => formatDecimal(v, 1) },
+    { key: "cpi", label: "CPI", format: (v) => formatDecimal(v, 1) },
+  ];
+
+  const head = `
+    <tr>
+      <th class="compare-matrix__stat">Stat</th>
+      ${careers.map((c) => `<th class="num-col"><span class="compare-matrix__driver" style="border-bottom-color:${colorForDriver(c.driver)}">${escapeHtml(c.driver)}</span></th>`).join("")}
+    </tr>
+  `;
+
+  const body = rows.map((row) => {
+    const values = careers.map((c) => {
+      const raw = c[row.key];
+      return typeof raw === "number" && !Number.isNaN(raw) ? raw : null;
+    });
+    const present = values.filter((v) => v != null);
+    const leader = present.length ? Math.max(...present) : null;
+    const hasLeader = leader != null && leader > 0 && present.length > 1;
+
+    const cells = careers.map((c, i) => {
+      const v = values[i];
+      const isLeader = hasLeader && v != null && v === leader;
+      return `<td class="num-col${isLeader ? " is-leader" : ""}">${escapeHtml(row.format(v))}</td>`;
+    }).join("");
+
+    return `<tr><th class="compare-matrix__stat" scope="row">${escapeHtml(row.label)}</th>${cells}</tr>`;
+  }).join("");
+
+  area.innerHTML = `
+    <div class="table-wrap">
+      <table class="data-table compare-matrix">
+        <thead>${head}</thead>
+        <tbody>${body}</tbody>
+      </table>
     </div>
   `;
 }
