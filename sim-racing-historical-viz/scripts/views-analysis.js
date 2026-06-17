@@ -89,6 +89,84 @@ function renderDriverList(dataset, area) {
   });
 }
 
+// League overview scatter: average season score (x) vs peak season score (y).
+// Dots near the diagonal are consistent; high above it are spiky one-hit peaks.
+// Surfaces a "shape" of the field that no table conveys.
+function buildConsistencyScatter(dataset) {
+  const recs = dataset.careerRecords.filter((r) => (r.avgWs || 0) > 0 && (r.peakWs || 0) > 0 && (r.seasonCount || 0) >= 1);
+  if (recs.length < 4) return "";
+
+  const width = 860, height = 380;
+  const pad = { top: 24, right: 24, bottom: 48, left: 52 };
+  const iw = width - pad.left - pad.right;
+  const ih = height - pad.top - pad.bottom;
+  const maxV = Math.max(1, ...recs.map((r) => Math.max(r.avgWs, r.peakWs))) * 1.05;
+  const sx = (v) => pad.left + (v / maxV) * iw;
+  const sy = (v) => pad.top + ih - (v / maxV) * ih;
+
+  const grid = [0.25, 0.5, 0.75, 1].map((ratio) => {
+    const v = ratio * maxV;
+    return `<line x1="${pad.left}" y1="${sy(v)}" x2="${width - pad.right}" y2="${sy(v)}" stroke="rgba(0,0,0,0.06)" stroke-dasharray="4 6"/>` +
+      `<text x="${pad.left - 8}" y="${sy(v) + 4}" text-anchor="end" font-size="11" fill="#888">${formatDecimal(v, 1)}</text>` +
+      `<text x="${sx(v)}" y="${height - 28}" text-anchor="middle" font-size="11" fill="#888">${formatDecimal(v, 1)}</text>`;
+  }).join("");
+
+  const diag = `<line x1="${sx(0)}" y1="${sy(0)}" x2="${sx(maxV)}" y2="${sy(maxV)}" stroke="rgba(0,0,0,0.18)" stroke-dasharray="3 5"/>`;
+
+  const labelSet = new Set([...recs].sort((a, b) => b.peakWs - a.peakWs).slice(0, 6).map((r) => r.driver));
+  const dots = recs.map((r) => {
+    const x = sx(r.avgWs), y = sy(r.peakWs);
+    const isTop = labelSet.has(r.driver);
+    // every dot carries its data so the JS tooltip can label all drivers on hover
+    return `<circle class="scatter-dot" cx="${x}" cy="${y}" r="${isTop ? 5 : 4.5}" fill="${isTop ? "var(--accent)" : "rgba(13,110,253,0.5)"}" stroke="#fff" stroke-width="1" ` +
+      `data-driver="${escapeHtml(r.driver)}" data-avg="${formatDecimal(r.avgWs, 1)}" data-peak="${formatDecimal(r.peakWs, 1)}"></circle>` +
+      (isTop ? `<text x="${x + 7}" y="${y + 3}" font-size="10" font-weight="700" fill="var(--text)" style="paint-order:stroke;stroke:#fff;stroke-width:3;stroke-linejoin:round;pointer-events:none">${escapeHtml(r.driver)}</text>` : "");
+  }).join("");
+
+  return `
+    <div class="card mb-1">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Consistency vs Peak</h3>
+          <div class="card__subtitle">Avg season score (x) vs best season (y) · dots near the line are steady, high above are spiky · hover any dot</div>
+        </div>
+      </div>
+      <div class="card__body">
+        <div class="scatter-wrap">
+          <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Consistency versus peak scatter" preserveAspectRatio="xMidYMid meet">
+            <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#fafafa"/>
+            ${grid}${diag}
+            <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
+            <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
+            <text x="${pad.left + iw / 2}" y="${height - 8}" text-anchor="middle" font-size="11" fill="#888">Average season score &rarr;</text>
+            ${dots}
+          </svg>
+          <div class="scatter-tip" hidden></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Snappy interactive tooltip for the scatter — labels every dot on hover, not
+// just the top few. Uses event delegation so it survives re-renders.
+function bindScatterTooltip(area) {
+  const wrap = area.querySelector(".scatter-wrap");
+  if (!wrap) return;
+  const tip = wrap.querySelector(".scatter-tip");
+
+  wrap.addEventListener("pointermove", (e) => {
+    const dot = e.target.closest(".scatter-dot");
+    if (!dot) { tip.hidden = true; return; }
+    const rect = wrap.getBoundingClientRect();
+    tip.innerHTML = `<strong>${escapeHtml(dot.dataset.driver)}</strong><span>avg ${escapeHtml(dot.dataset.avg)} · peak ${escapeHtml(dot.dataset.peak)}</span>`;
+    tip.hidden = false;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    tip.style.left = `${Math.min(x + 12, rect.width - tip.offsetWidth - 6)}px`;
+    tip.style.top = `${Math.max(y - tip.offsetHeight - 10, 4)}px`;
+  });
+  wrap.addEventListener("pointerleave", () => { tip.hidden = true; });
+}
+
 function renderAllDriversTable(dataset, area) {
   const columns = [
     { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 10, className: "wrap-col",
@@ -110,6 +188,7 @@ function renderAllDriversTable(dataset, area) {
   ];
 
   area.innerHTML = `
+    ${buildConsistencyScatter(dataset)}
     <div class="card">
       <div class="card__header">
         <h3 class="card__title">All Driver Career Totals</h3>
@@ -122,6 +201,7 @@ function renderAllDriversTable(dataset, area) {
   `;
 
   renderSortableTable("all-drivers-table", columns, dataset.careerRecords);
+  bindScatterTooltip(area);
   bindDriverLinkClicks(area, dataset);
 }
 
@@ -617,7 +697,7 @@ function buildComparisonCard(aggregate) {
     .join("");
 
   return `
-    <div class="comparison-driver-card" style="border-top-color:${colorForDriver(aggregate.driver)}">
+    <div class="comparison-driver-card" style="border-top-color:${compareColorFor(aggregate.driver)}">
       <div class="comparison-driver-card__name">
         <span>${escapeHtml(aggregate.driver)}</span>
         <span class="comparison-driver-card__score">${formatComposite(aggregate.composite)}</span>
@@ -634,7 +714,7 @@ function buildCarSpecCard(driver, breakdown) {
   const maxWs = Math.max(formula?.avgWs || 0, sports?.avgWs || 0);
 
   return `
-    <div class="comparison-driver-card" style="border-top-color:${colorForDriver(driver)}">
+    <div class="comparison-driver-card" style="border-top-color:${compareColorFor(driver)}">
       <div class="comparison-driver-card__name"><span>${escapeHtml(driver)}</span></div>
       <div class="spec-split-grid">
         ${buildSpecPanel("Formula", "#3b82f6", formula, maxWs)}
@@ -697,7 +777,7 @@ function renderCompareArcChart(dataset) {
   const endpoints = [];
   const seriesMarkup = state.selectedDrivers.map((driver) => {
     const series = filtered.filter((r) => r.driver === driver).sort((a, b) => getSeasonOrder(a.seasonId) - getSeasonOrder(b.seasonId));
-    const color = colorForDriver(driver);
+    const color = compareColorFor(driver);
     const pts = series.map((r) => {
       const xi = seasons.indexOf(r.seasonId);
       return { x: pad.left + (xi / xDen) * iw, y: pad.top + ih - ((r.weightedScore || 0) / yMax) * ih, sid: r.seasonId, score: r.weightedScore };
@@ -719,7 +799,7 @@ function renderCompareArcChart(dataset) {
       ${seriesMarkup}${labels}${xLabels}
     </svg>
     <div class="chart-legend">
-      ${state.selectedDrivers.map((d) => `<span class="legend-item"><span class="legend-swatch" style="background:${colorForDriver(d)}"></span>${escapeHtml(d)}</span>`).join("")}
+      ${state.selectedDrivers.map((d) => `<span class="legend-item"><span class="legend-swatch" style="background:${compareColorFor(d)}"></span>${escapeHtml(d)}</span>`).join("")}
     </div>
   `;
 }
@@ -759,7 +839,7 @@ function renderCompareTotals(dataset) {
   const head = `
     <tr>
       <th class="compare-matrix__stat">Stat</th>
-      ${careers.map((c) => `<th class="num-col"><span class="compare-matrix__driver" style="border-bottom-color:${colorForDriver(c.driver)}">${escapeHtml(c.driver)}</span></th>`).join("")}
+      ${careers.map((c) => `<th class="num-col"><span class="compare-matrix__driver" style="border-bottom-color:${compareColorFor(c.driver)}">${escapeHtml(c.driver)}</span></th>`).join("")}
     </tr>
   `;
 
@@ -809,7 +889,7 @@ function renderCompareTopTracks(dataset) {
       ${state.selectedDrivers.map((driver) => {
         const tracks = topTracksByDriver[driver] || [];
         return `
-          <div class="comparison-driver-card" style="border-top-color:${colorForDriver(driver)}">
+          <div class="comparison-driver-card" style="border-top-color:${compareColorFor(driver)}">
             <div class="comparison-driver-card__name"><span>${escapeHtml(driver)}</span></div>
             ${tracks.length
               ? `<div class="table-wrap">${renderDataTable(columns, tracks, { tableClassName: "data-table--compact", compact: true })}</div>`

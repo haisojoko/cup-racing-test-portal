@@ -378,6 +378,26 @@ function colorForDriver(driver) {
   return DRIVER_PALETTE[hash % DRIVER_PALETTE.length];
 }
 
+// Hybrid color assignment for an ordered set of N series.
+// Small sets (<= curated palette) use the hand-picked palette by slot, which
+// looks better and stays distinct. Larger sets fall back to an evenly-spaced
+// HSL ramp so adjacent series can never collide regardless of count.
+function seriesColor(index, total) {
+  const i = Math.max(0, index | 0);
+  if (total <= DRIVER_PALETTE.length) return DRIVER_PALETTE[i % DRIVER_PALETTE.length];
+  const hue = Math.round((i * 360) / total + 200) % 360;
+  const sat = i % 2 ? 55 : 72;
+  const light = i % 3 === 0 ? 38 : 47;
+  return `hsl(${hue} ${sat}% ${light}%)`;
+}
+
+// Color for a driver within the current Compare selection (stable, <= 6 drivers
+// so always a distinct curated palette slot).
+function compareColorFor(driver) {
+  const idx = state.selectedDrivers.indexOf(driver);
+  return seriesColor(idx < 0 ? 0 : idx, state.selectedDrivers.length);
+}
+
 function metricLabel(key) {
   const labels = {
     cpi: "Career Performance Index",
