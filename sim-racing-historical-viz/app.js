@@ -99,7 +99,7 @@ const state = {
     profileDriver: "",
     driverSearch: "",
     detailSeason: null,
-    detailProgressMode: "week",
+    detailProgressMode: "race",
   },
   drivers: {
     view: "list",
