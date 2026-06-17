@@ -164,7 +164,7 @@ function renderProgressChart(detail) {
   const area = document.getElementById("season-progress-area");
   if (!area) return;
 
-  const mode = state.filters.detailProgressMode || "week";
+  const mode = state.filters.detailProgressMode || "race";
   if (!detail.venues.length || !detail.standings.length) {
     area.innerHTML = renderEmptyStateMarkup("No venue data available for progression chart.");
     return;
