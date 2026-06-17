@@ -145,6 +145,7 @@ function renderSeasonDetail(dataset) {
 
     <div id="season-progress-area"></div>
     <div id="season-standings-area" class="mt-1"></div>
+    ${buildSeasonHeatmapHtml(detail)}
     <div id="season-venues-area" class="mt-1"></div>
   `;
 
@@ -234,8 +235,10 @@ function buildProgressionScope(detail, title, className, rows, mode) {
   finalRows.forEach((r) => { cumulative[r.driver] = 0; });
 
   const seriesByDriver = {};
-  finalRows.forEach((r) => {
-    seriesByDriver[r.driver] = { driver: r.driver, color: colorForDriver(r.driver), rounds: [] };
+  finalRows.forEach((r, i) => {
+    // color by final-standing rank so the field is internally consistent and
+    // collision-free regardless of how many drivers a season had.
+    seriesByDriver[r.driver] = { driver: r.driver, color: seriesColor(i, finalRows.length), rounds: [] };
   });
 
   checkpoints.forEach((cp) => {
@@ -298,8 +301,12 @@ function buildCheckpoints(detail, finalLookup, mode) {
 }
 
 function buildProgressChartHtml(detail, scope, mode) {
-  const width = 980, height = 360;
+  const width = 980;
   const pad = { top: 24, right: 136, bottom: 58, left: 56 };
+  // Height grows with the number of drivers so every line and endpoint label
+  // gets vertical breathing room instead of overflowing a fixed canvas.
+  const rowH = 22;
+  const height = Math.max(360, pad.top + pad.bottom + scope.driverCount * rowH);
   const iw = width - pad.left - pad.right;
   const ih = height - pad.top - pad.bottom;
   const xDen = Math.max(scope.rounds.length - 1, 1);
@@ -401,10 +408,13 @@ function renderStandingsTable(detail) {
     { key: "teamName", label: "Team", className: "wrap-col", widthRem: 10 },
   ];
 
+  // teamName carries no fixed width so it absorbs the table's slack and stretches
+  // horizontally; points is pinned narrow so it no longer leaves dead space to its
+  // right. wrap-col lets both name and members wrap on narrow/mobile widths.
   const teamColumns = [
-    { key: "teamName", label: "Team", strong: true, sticky: true, stickyWidthRem: 12, className: "wrap-col" },
-    { key: "points", label: "Points" },
-    { key: "members", label: "Drivers", className: "wrap-col", widthRem: 12, render: (r) => r.members.join(", ") || "n/a" },
+    { key: "teamName", label: "Team", strong: true, className: "wrap-col", minWidthRem: 16 },
+    { key: "points", label: "Points", className: "num-col", widthRem: 6 },
+    { key: "members", label: "Drivers", className: "wrap-col", widthRem: 18, render: (r) => r.members.join(", ") || "n/a" },
   ];
 
   area.innerHTML = `
@@ -414,6 +424,7 @@ function renderStandingsTable(detail) {
         <span class="badge">${detail.standings.length} drivers</span>
       </div>
       <div class="card__body">
+        ${buildGapChartHtml(detail)}
         <div id="season-standings-table"></div>
       </div>
     </div>
@@ -433,6 +444,88 @@ function renderStandingsTable(detail) {
   if (detail.teamStandings.length) {
     renderSortableTable("season-team-standings-table", teamColumns, detail.teamStandings);
   }
+}
+
+// Compact "gap to leader" chart: turns the top of a long points table into a
+// shape you can read at a glance. Top 12 classified drivers by points.
+function buildGapChartHtml(detail) {
+  const ranked = [...detail.standings].filter((r) => r.driver).sort(compareStandingsRows);
+  if (ranked.length < 2) return "";
+  const top = ranked.slice(0, 12);
+  const leaderPts = top[0].points || 0;
+  if (leaderPts <= 0) return "";
+
+  const rows = top.map((r, i) => {
+    const pts = r.points || 0;
+    const gap = leaderPts - pts;
+    const w = Math.max(2, (pts / leaderPts) * 100);
+    return `
+      <div class="gap-row${i === 0 ? " gap-row--leader" : ""}">
+        <span class="gap-row__pos">${i + 1}</span>
+        <span class="gap-row__name" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
+        <span class="gap-row__bar"><span class="gap-row__fill" style="width:${w}%"></span><span class="gap-row__pts">${formatInteger(pts)}</span></span>
+        <span class="gap-row__val">${gap > 0 ? `&minus;${formatInteger(gap)}` : "leader"}</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="gap-chart" role="img" aria-label="Points gap to leader, top ${top.length}">
+      <div class="gap-chart__caption">Points &amp; gap to leader · top ${top.length}</div>
+      ${rows}
+    </div>`;
+}
+
+// Driver x venue heatmap: points scored per venue, color-graded. Replaces the
+// "read 100 cells of digits" problem with an at-a-glance form-guide. Top N by
+// final standing so it stays legible.
+function buildSeasonHeatmapHtml(detail) {
+  if (!detail.venues || detail.venues.length < 2) return "";
+  const ranked = [...detail.standings].filter((r) => r.driver).sort(compareStandingsRows).slice(0, 16);
+  if (ranked.length < 2) return "";
+
+  const venues = [...detail.venues].sort((a, b) => (a.venueNumber || 0) - (b.venueNumber || 0));
+  // driver -> (venueNumber -> dayTotal)
+  const byDriver = {};
+  venues.forEach((v) => {
+    v.rows.forEach((row) => {
+      if (!byDriver[row.driver]) byDriver[row.driver] = {};
+      byDriver[row.driver][v.venueNumber] = row.dayTotal;
+    });
+  });
+  const maxPts = Math.max(1, ...venues.flatMap((v) => v.rows.map((r) => r.dayTotal || 0)));
+
+  const head = `<tr><th class="heatmap__rowhead">Driver</th>${venues.map((v) =>
+    `<th title="${escapeHtml(v.venueName)}">V${v.venueNumber}</th>`).join("")}</tr>`;
+
+  const body = ranked.map((r) => {
+    const cells = venues.map((v) => {
+      const pts = byDriver[r.driver]?.[v.venueNumber];
+      if (pts == null) return `<td class="is-empty">&middot;</td>`;
+      const t = Math.max(0, Math.min(1, pts / maxPts));
+      // Gray (low / far from max) -> green (high / near max): saturation climbs
+      // from near-zero so weak results read clearly gray, strong ones vivid green.
+      const bg = `hsl(150 ${Math.round(4 + t * 56)}% ${Math.round(91 - t * 45)}%)`;
+      const fg = t > 0.5 ? "#fff" : "var(--text)";
+      return `<td style="background:${bg};color:${fg}" title="${escapeHtml(r.driver)} — ${escapeHtml(v.venueName)}: ${formatInteger(pts)} pts">${formatInteger(pts)}</td>`;
+    }).join("");
+    return `<tr><td class="heatmap__rowhead">${escapeHtml(r.driver)}</td>${cells}</tr>`;
+  }).join("");
+
+  return `
+    <div class="card mt-1">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Venue Form Guide</h3>
+          <div class="card__subtitle">Points per venue · top ${ranked.length} drivers</div>
+        </div>
+        <span class="badge">${venues.length} venues</span>
+      </div>
+      <div class="card__body">
+        <div class="heatmap-scroll">
+          <table class="heatmap"><thead>${head}</thead><tbody>${body}</tbody></table>
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderVenueTables(detail) {

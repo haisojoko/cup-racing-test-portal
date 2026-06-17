@@ -894,7 +894,17 @@ button, input, select, textarea { font: inherit; }
   border-bottom: 2px solid var(--border);
   background: var(--surface);
   white-space: nowrap;
+  /* Keep column labels visible while scrolling long standings tables. */
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
+
+/* Header cell that is also a sticky first column must outrank body sticky cells. */
+.data-table th.is-sticky-col { z-index: 4; }
+
+.data-table tbody tr:nth-child(even) td { background: rgba(0, 0, 0, 0.018); }
+.data-table tbody tr:nth-child(even) .is-sticky-col { background: #fbfbfc; }
 
 .data-table td {
   padding: 0.5rem 0.75rem;
@@ -1030,6 +1040,132 @@ button, input, select, textarea { font: inherit; }
   align-items: center;
   gap: 0.35rem;
 }
+
+/* ---- Gap-to-leader chart (standings) ---- */
+.gap-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface-hover);
+  border-radius: var(--radius-md);
+}
+.gap-chart__caption {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.gap-row {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(5.5rem, 9rem) 1fr 3.2rem;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+.gap-row__pos { color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; font-size: 0.78rem; }
+.gap-row__name { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gap-row__bar {
+  position: relative;
+  height: 20px;
+  border-radius: 5px;
+  background: rgba(13, 110, 253, 0.08);
+  overflow: hidden;
+}
+.gap-row__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--accent), #4f9cff);
+}
+.gap-row--leader .gap-row__fill { background: linear-gradient(90deg, #b28a28, #e0b84e); }
+.gap-row__pts {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.gap-row__val {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  text-align: right;
+  white-space: nowrap;
+}
+.gap-row--leader .gap-row__val { color: #b28a28; font-weight: 700; }
+
+/* ---- Season heatmap (driver x venue) ---- */
+.heatmap-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.heatmap {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 4px;
+  font-size: 0.82rem;
+}
+.heatmap th {
+  font-weight: 600;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.25rem 0.4rem;
+  text-align: center;
+  vertical-align: bottom;
+}
+.heatmap th.heatmap__rowhead, .heatmap td.heatmap__rowhead {
+  width: 9rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.heatmap td {
+  height: 2.6rem;
+  text-align: center;
+  border-radius: 6px;
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.heatmap td.is-empty { color: var(--text-muted); background: var(--surface-hover); font-weight: 400; }
+
+/* ---- Consistency vs peak scatter ---- */
+.scatter-wrap { position: relative; }
+.scatter-dot { cursor: pointer; transition: r 0.08s ease; }
+.scatter-dot:hover { stroke: #111; stroke-width: 1.5; }
+.scatter-tip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.6rem;
+  background: rgba(17, 24, 39, 0.94);
+  color: #fff;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.scatter-tip strong { font-size: 0.82rem; }
+.scatter-tip span { color: rgba(255, 255, 255, 0.75); font-variant-numeric: tabular-nums; }
+.scatter-tip[hidden] { display: none; }
 
 .legend-swatch {
   display: inline-block;
