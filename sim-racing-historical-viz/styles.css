@@ -985,7 +985,7 @@ button, input, select, textarea { font: inherit; }
   color: var(--text);
 }
 
-.compare-matrix td.is-leader {
+.compare-matrix tbody tr td.is-leader {
   background: var(--accent-soft);
   color: var(--text);
   font-weight: 700;
