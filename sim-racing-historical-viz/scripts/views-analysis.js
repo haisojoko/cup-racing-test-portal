@@ -20,6 +20,7 @@ function renderDriversView(dataset) {
         ["allDrivers", "All Drivers"],
         ["weightedScores", "Weighted Scores"],
         ["cpiRankings", "CPI Rankings"],
+        ["ratings", "Ratings"],
       ].map(([key, label]) => `
         <button class="subtab-button ${view === key ? "is-active" : ""}" type="button" data-driver-view="${key}">${escapeHtml(label)}</button>
       `).join("")}
@@ -38,6 +39,9 @@ function renderDriversView(dataset) {
       break;
     case "cpiRankings":
       renderCpiRankingsTable(dataset, area);
+      break;
+    case "ratings":
+      renderRatingsTable(dataset, area);
       break;
     default:
       renderDriverList(dataset, area);
@@ -221,6 +225,8 @@ function renderWeightedScoresTable(dataset, area) {
     { key: "fastestLapRate", label: "FL%", format: "percent", className: "num-col" },
     { key: "poleRate", label: "Pole%", format: "percent", className: "num-col" },
     { key: "pointsRate", label: "Pts Rate", format: "percent", className: "num-col" },
+    { key: "fieldSize", label: "Field", className: "num-col" },
+    { key: "penalties", label: "Pen.", className: "num-col" },
     { key: "wdc", label: "WDC", render: (r) => r.wdc ? "Yes" : "-" },
     { key: "wcc", label: "WCC", render: (r) => r.wcc ? "Yes" : "-" },
   ];
@@ -279,6 +285,49 @@ function renderCpiRankingsTable(dataset, area) {
   bindDriverLinkClicks(area, dataset);
 }
 
+function renderRatingsTable(dataset, area) {
+  const records = [...dataset.ratingRecords].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  const trajectoryByDriver = groupBy(dataset.ratingTrajectory, "driver");
+  const withChange = records.map((r, i) => {
+    const history = sortBySeason(trajectoryByDriver[r.driver] || []);
+    const last = history.length ? history[history.length - 1] : null;
+    return { ...r, rank: i + 1, lastChange: last?.change ?? null };
+  });
+
+  const columns = [
+    { key: "rank", label: "#", className: "num-col" },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 10, className: "wrap-col",
+      render: (r) => `<span class="driver-link" data-driver="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>`, rawHtml: true },
+    { key: "rating", label: "Rating", className: "num-col", render: (r) => formatDecimal(r.rating, 1) },
+    { key: "lastChange", label: "Last Change", className: "num-col", render: (r) => {
+      if (r.lastChange == null) return "n/a";
+      const prefix = r.lastChange >= 0 ? "+" : "";
+      const cls = r.lastChange >= 0 ? "color:var(--success)" : "color:var(--danger)";
+      return `<span style="${cls}">${prefix}${formatDecimal(r.lastChange, 1)}</span>`;
+    }, rawHtml: true },
+    { key: "lastSeason", label: "Last Season", sortValue: (r) => getSeasonOrder(r.lastSeason) },
+    { key: "careerRaces", label: "Races", className: "num-col" },
+    { key: "seasons", label: "Seasons", className: "num-col" },
+    { key: "wdc", label: "WDC", className: "num-col" },
+    { key: "wcc", label: "WCC", className: "num-col" },
+  ];
+
+  area.innerHTML = `
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">Career Ratings</h3>
+        <span class="badge">${records.length} drivers</span>
+      </div>
+      <div class="card__body">
+        <div id="ratings-table"></div>
+      </div>
+    </div>
+  `;
+
+  renderSortableTable("ratings-table", columns, withChange);
+  bindDriverLinkClicks(area, dataset);
+}
+
 function bindDriverLinkClicks(container, dataset) {
   container.addEventListener("click", (e) => {
     const link = e.target.closest("[data-driver]");
@@ -313,6 +362,7 @@ function renderDriverProfile(dataset) {
       <button class="back-button" type="button" id="driver-back">&larr; All Drivers</button>
       <h1 class="profile-header__name">${escapeHtml(driver)}</h1>
       ${career.cpi ? `<span class="badge badge--accent">CPI ${formatDecimal(career.cpi)}</span>` : ""}
+      ${career.currentRating != null ? `<span class="badge badge--accent">Rating ${formatDecimal(career.currentRating, 1)}</span>` : ""}
     </div>
 
     <div class="stat-grid mb-1">
@@ -328,6 +378,7 @@ function renderDriverProfile(dataset) {
       ${buildStatItem(formatPercent(career.poleRate), "Pole Rate")}
       ${buildStatItem(formatPercent(career.fastestLapRate), "FL Rate")}
       ${buildStatItem(formatDecimal(career.pointsPerRace, 1), "Pts / Race")}
+      ${career.currentRating != null ? buildStatItem(formatDecimal(career.currentRating, 1), "Rating") : ""}
       ${buildStatItem(career.bestSeasonId || "n/a", "Peak Season")}
       ${buildStatItem(formatDecimal(career.bestSeasonScore), "Peak WS")}
     </div>
@@ -351,6 +402,7 @@ function renderDriverProfile(dataset) {
     </div>
     ` : ""}
 
+    <div id="profile-rating-history" class="mb-1"></div>
     <div id="profile-fingerprints" class="mb-1"></div>
     <div id="profile-what-changed" class="mb-1"></div>
     <div id="profile-tracks" class="mb-1"></div>
@@ -368,10 +420,83 @@ function renderDriverProfile(dataset) {
     renderDriverProfile(dataset);
   });
 
+  renderRatingHistory(dataset, driver);
   renderFingerprints(dataset, driver);
   renderWhatChanged(dataset, driver);
   renderTrackPerformance(dataset, driver);
   renderProfileWeightedScores(dataset, driver);
+}
+
+function renderRatingHistory(dataset, driver) {
+  const area = document.getElementById("profile-rating-history");
+  if (!area) return;
+
+  const career = dataset.careerRecords.find((r) => r.driver === driver);
+  if (!career || !career.ratingHistory || career.ratingHistory.length < 2) {
+    area.innerHTML = "";
+    return;
+  }
+
+  const records = career.ratingHistory;
+  const width = 820, height = 280;
+  const pad = { top: 24, right: 24, bottom: 48, left: 60 };
+  const iw = width - pad.left - pad.right;
+  const ih = height - pad.top - pad.bottom;
+  const xDen = Math.max(records.length - 1, 1);
+  const ratings = records.map((r) => r.rating || 0);
+  const yMin = Math.min(...ratings);
+  const yMax = Math.max(...ratings);
+  const yRange = Math.max(yMax - yMin, 50);
+  const yLow = yMin - yRange * 0.1;
+  const yHigh = yMax + yRange * 0.1;
+
+  const xScale = (i) => pad.left + (i / xDen) * iw;
+  const yScale = (v) => pad.top + ih - ((v - yLow) / (yHigh - yLow)) * ih;
+
+  const gridSteps = 5;
+  const grid = Array.from({ length: gridSteps + 1 }, (_, i) => {
+    const v = yLow + (i / gridSteps) * (yHigh - yLow);
+    const y = yScale(v);
+    return `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="rgba(0,0,0,0.06)" stroke-dasharray="4 6"/>` +
+      `<text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="#888">${Math.round(v)}</text>`;
+  }).join("");
+
+  const xLabelStep = Math.max(1, Math.ceil(records.length / 12));
+  const xLabels = records.map((r, i) => {
+    if (i % xLabelStep !== 0 && i !== records.length - 1) return "";
+    return `<text x="${xScale(i)}" y="${height - 16}" text-anchor="middle" font-size="11" fill="#888">${escapeHtml(r.throughSeason)}</text>`;
+  }).join("");
+
+  const baseLine = yLow <= 1000 && yHigh >= 1000
+    ? `<line x1="${pad.left}" y1="${yScale(1000)}" x2="${width - pad.right}" y2="${yScale(1000)}" stroke="rgba(220,53,69,0.3)" stroke-dasharray="6 4"/>` +
+      `<text x="${width - pad.right + 6}" y="${yScale(1000) + 4}" font-size="10" fill="rgba(220,53,69,0.5)">1000</text>`
+    : "";
+
+  const color = "var(--accent)";
+  const pts = records.map((r, i) => ({ x: xScale(i), y: yScale(r.rating || 0) }));
+  const polyline = `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${pts.map((p) => `${p.x},${p.y}`).join(" ")}"/>`;
+  const dots = records.map((r, i) => {
+    const changeStr = r.change != null ? ` | ${r.change >= 0 ? "+" : ""}${formatDecimal(r.change, 1)}` : "";
+    return `<circle cx="${pts[i].x}" cy="${pts[i].y}" r="4" fill="${color}" stroke="#fff" stroke-width="1.5"><title>${escapeHtml(r.throughSeason)} | ${formatDecimal(r.rating, 1)}${changeStr}</title></circle>`;
+  }).join("");
+
+  area.innerHTML = `
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">Rating History</h3>
+        <span class="badge">Current: ${formatDecimal(career.currentRating, 1)}</span>
+      </div>
+      <div class="card__body">
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Rating history" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto">
+          <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#fafafa"/>
+          ${grid}${baseLine}
+          <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
+          <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
+          ${polyline}${dots}${xLabels}
+        </svg>
+      </div>
+    </div>
+  `;
 }
 
 function renderFingerprints(dataset, driver) {
@@ -632,6 +757,13 @@ function renderCompareView(dataset) {
 
     <div class="card mb-1">
       <div class="card__header">
+        <h3 class="card__title">Rating Trajectory</h3>
+      </div>
+      <div class="card__body" id="compare-rating-chart"></div>
+    </div>
+
+    <div class="card mb-1">
+      <div class="card__header">
         <h3 class="card__title">Formula vs Sports</h3>
       </div>
       <div class="card__body">
@@ -671,6 +803,7 @@ function renderCompareView(dataset) {
   if (selected.length) {
     renderCompareTotals(dataset);
     renderCompareArcChart(dataset);
+    renderCompareRatingChart(dataset);
     renderCompareTopTracks(dataset);
     renderCompareWeightedScores(dataset);
   }
@@ -794,6 +927,88 @@ function renderCompareArcChart(dataset) {
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Weighted score comparison">
       <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#fafafa"/>
       ${grid.join("")}
+      <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
+      <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
+      ${seriesMarkup}${labels}${xLabels}
+    </svg>
+    <div class="chart-legend">
+      ${state.selectedDrivers.map((d) => `<span class="legend-item"><span class="legend-swatch" style="background:${compareColorFor(d)}"></span>${escapeHtml(d)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderCompareRatingChart(dataset) {
+  const area = document.getElementById("compare-rating-chart");
+  if (!area) return;
+
+  const trajectoryByDriver = groupBy(dataset.ratingTrajectory, "driver");
+  const filtered = state.selectedDrivers
+    .flatMap((d) => (trajectoryByDriver[d] || []).filter((r) => r.rating != null));
+
+  if (!filtered.length) {
+    area.innerHTML = renderEmptyStateMarkup("No rating data for selected drivers.");
+    return;
+  }
+
+  const allSeasons = uniqueList(filtered.map((r) => r.seasonId))
+    .sort((a, b) => getSeasonOrder(a) - getSeasonOrder(b));
+
+  const width = 820, height = 340;
+  const pad = { top: 24, right: 138, bottom: 48, left: 60 };
+  const iw = width - pad.left - pad.right;
+  const ih = height - pad.top - pad.bottom;
+  const xDen = Math.max(allSeasons.length - 1, 1);
+
+  const allRatings = filtered.map((r) => r.rating);
+  const yMin = Math.min(...allRatings);
+  const yMax = Math.max(...allRatings);
+  const yRange = Math.max(yMax - yMin, 100);
+  const yLow = yMin - yRange * 0.08;
+  const yHigh = yMax + yRange * 0.08;
+
+  const xScale = (i) => pad.left + (i / xDen) * iw;
+  const yScale = (v) => pad.top + ih - ((v - yLow) / (yHigh - yLow)) * ih;
+
+  const gridSteps = 5;
+  const grid = Array.from({ length: gridSteps + 1 }, (_, i) => {
+    const v = yLow + (i / gridSteps) * (yHigh - yLow);
+    const y = yScale(v);
+    return `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="rgba(0,0,0,0.06)" stroke-dasharray="4 6"/>` +
+      `<text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="#888">${Math.round(v)}</text>`;
+  }).join("");
+
+  const xLabelStep = Math.max(1, Math.ceil(allSeasons.length / 12));
+  const xLabels = allSeasons.map((sid, i) => {
+    if (i % xLabelStep !== 0 && i !== allSeasons.length - 1) return "";
+    return `<text x="${xScale(i)}" y="${height - 16}" text-anchor="middle" font-size="11" fill="#888">${escapeHtml(sid)}</text>`;
+  }).join("");
+
+  const baseLine = yLow <= 1000 && yHigh >= 1000
+    ? `<line x1="${pad.left}" y1="${yScale(1000)}" x2="${width - pad.right}" y2="${yScale(1000)}" stroke="rgba(220,53,69,0.25)" stroke-dasharray="6 4"/>`
+    : "";
+
+  const endpoints = [];
+  const seriesMarkup = state.selectedDrivers.map((driver) => {
+    const series = (trajectoryByDriver[driver] || [])
+      .filter((r) => r.rating != null)
+      .sort((a, b) => a.seasonOrder - b.seasonOrder);
+    const color = compareColorFor(driver);
+    const pts = series.map((r) => {
+      const xi = allSeasons.indexOf(r.seasonId);
+      return { x: xScale(xi), y: yScale(r.rating), sid: r.seasonId, rating: r.rating };
+    }).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+
+    if (pts.length) endpoints.push({ driver, color, x: pts[pts.length - 1].x, y: pts[pts.length - 1].y });
+    return `<polyline fill="none" stroke="${color}" stroke-width="2" points="${pts.map((p) => `${p.x},${p.y}`).join(" ")}"/>` +
+      pts.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="${color}" stroke="#fff" stroke-width="1.5"><title>${escapeHtml(driver)} | ${escapeHtml(p.sid)} | ${formatDecimal(p.rating, 1)}</title></circle>`).join("");
+  }).join("");
+
+  const labels = buildEndpointLabels(endpoints, width, height, pad);
+
+  area.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Rating trajectory comparison" preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#fafafa"/>
+      ${grid}${baseLine}
       <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
       <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
       ${seriesMarkup}${labels}${xLabels}
