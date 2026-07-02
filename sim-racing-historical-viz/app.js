@@ -198,7 +198,7 @@ function parseRouteHash(hash) {
   }
 
   if (activeTab === "drivers") {
-    const driverViews = ["list", "allDrivers", "weightedScores", "cpiRankings"];
+    const driverViews = ["list", "allDrivers", "weightedScores", "cpiRankings", "ratings"];
     if (parts[1] === "profile" && parts[2]) {
       return { activeTab, profileDriver: parts.slice(2).join("/"), driverView: "list" };
     }
