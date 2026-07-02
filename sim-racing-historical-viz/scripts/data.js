@@ -17,6 +17,8 @@ function parseDataset(name, rawMarkdown, source) {
     seasonStandings: [],
     weightedRecords: [],
     careerRecords: [],
+    ratingRecords: [],
+    ratingTrajectory: [],
     validations: [],
     championshipWinners: [],
     stats: {
@@ -172,6 +174,8 @@ function parseDataset(name, rawMarkdown, source) {
   const bestSeasonRows = parseBestSeasonBullets(
     extractBulletsAfterHeading(lines, /^##\s+Best Season by Driver\s*$/i),
   );
+  const currentRatingRows = extractTableRowsAfterHeading(lines, /^##\s+Current Ratings\s*$/i);
+  const ratingTrajectoryRows = extractTableRowsAfterHeading(lines, /^##\s+Rating Trajectory/i);
 
   if (!weightedRows.length) {
     throw new Error("Missing a parsable `## All-Time Weighted Score Rankings` table.");
@@ -210,6 +214,8 @@ function parseDataset(name, rawMarkdown, source) {
       poleRate: parsePercent(row["Pole%"]),
       pointsRate: parsePercent(row.PtsRate),
       participationRate: parsePercent(row["Part."]),
+      fieldSize: parseNumberish(row.Field),
+      penalties: parseNumberish(row["Pen."]),
       wdc: /yes/i.test(row.WDC || "") || Boolean(standing.wdc),
       wcc: /yes/i.test(row.WCC || "") || Boolean(standing.wcc),
       titlesScore,
@@ -237,6 +243,44 @@ function parseDataset(name, rawMarkdown, source) {
       wccs: parseNumberish(row.WCCs),
     };
   });
+
+  const ratingLookup = {};
+  currentRatingRows.forEach((row) => {
+    ratingLookup[normalizeInlineText(row.Driver)] = {
+      rating: parseDecimal(row.Rating),
+      lastSeason: normalizeSeasonId(row["Last Season"]),
+    };
+  });
+
+  dataset.ratingRecords = currentRatingRows.map((row) => ({
+    rank: parseNumberish(row.Rank),
+    driver: normalizeInlineText(row.Driver),
+    rating: parseDecimal(row.Rating),
+    lastSeason: normalizeSeasonId(row["Last Season"]),
+    careerRaces: parseNumberish(row["Career Races"]),
+    seasons: parseNumberish(row.Seasons),
+    wdc: parseNumberish(row.WDC),
+    wcc: parseNumberish(row.WCC),
+  }));
+
+  dataset.ratingTrajectory = ratingTrajectoryRows.map((row) => {
+    const seasonId = normalizeSeasonId(row["Through Season"]);
+    return {
+      driver: normalizeInlineText(row.Driver),
+      throughSeason: seasonId,
+      seasonId,
+      seasonOrder: getSeasonOrder(seasonId),
+      rating: parseDecimal(row.Rating),
+      change: parseDecimal(row.Change),
+      score: parseDecimal(row.Score),
+      expected: parseDecimal(row.Expected),
+      upsetBonus: parseDecimal(row["Upset Bonus"]),
+      confidence: parsePercent(row.Confidence),
+      fieldSize: parseNumberish(row["Field Size"]),
+    };
+  });
+
+  const ratingByDriver = groupBy(dataset.ratingTrajectory, "driver");
 
   const careerLookup = {};
   careerRows.forEach((row) => {
@@ -333,6 +377,8 @@ function parseDataset(name, rawMarkdown, source) {
         bestSeasonScore,
         seasonCount: seasons.length,
         seasons,
+        currentRating: ratingLookup[driver]?.rating ?? null,
+        ratingHistory: sortBySeason(ratingByDriver[driver] || []),
         hasCareerGap: !careerLookup[driver],
       };
     })
