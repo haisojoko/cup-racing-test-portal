@@ -1574,7 +1574,10 @@ function buildTrackAggregates(dataset) {
             wins: 0,
             podiums: 0,
             top5s: 0,
+            poles: 0,
+            fastestLaps: 0,
             totalPoints: 0,
+            sumFinish: 0,
             seasonIds: [],
           };
         }
@@ -1590,6 +1593,12 @@ function buildTrackAggregates(dataset) {
           if (pos <= 3) entry.podiums += 1;
           if (pos <= 5) entry.top5s += 1;
           entry.totalPoints += race.points || 0;
+          entry.sumFinish += pos;
+          // Pole / fastest-lap are encoded as markers in the position cell,
+          // e.g. "1 (P,FL)", "3 (FL)", "6 (P)".
+          const markers = extractResultMarkers(race.position);
+          if (markers.pole) entry.poles += 1;
+          if (markers.fastestLap) entry.fastestLaps += 1;
         });
       });
     });
@@ -1602,9 +1611,99 @@ function buildTrackAggregates(dataset) {
     entry.rawWinRate = (entry.wins / entry.starts) * 100;
     entry.rawPodiumRate = (entry.podiums / entry.starts) * 100;
     entry.rawTop5Rate = (entry.top5s / entry.starts) * 100;
+    entry.avgFinish = entry.starts > 0 ? entry.sumFinish / entry.starts : null;
+    entry.poleRate = (entry.poles / entry.starts) * 100;
+    entry.fastestLapRate = (entry.fastestLaps / entry.starts) * 100;
+    entry.pointsPerStart = entry.starts > 0 ? entry.totalPoints / entry.starts : 0;
   });
 
   return applyBayesianShrinkage(aggregates);
+}
+
+// Parse pole (P) and fastest-lap (FL) markers out of a position cell such as
+// "1 (P,FL)" or "6 (P)". Returns booleans; unmarked cells yield all-false.
+function extractResultMarkers(position) {
+  const paren = String(position == null ? "" : position).match(/\(([^)]*)\)/);
+  if (!paren) return { pole: false, fastestLap: false };
+  const tokens = paren[1].split(",").map((token) => token.trim().toUpperCase());
+  return { pole: tokens.includes("P"), fastestLap: tokens.includes("FL") };
+}
+
+// Distinct tracks that have at least one recorded start, with how many
+// driver-seasons and total starts they carry (for the Tracks picker).
+function getTrackList(aggregates) {
+  const byTrack = {};
+  (aggregates || []).forEach((entry) => {
+    if (!byTrack[entry.track]) {
+      byTrack[entry.track] = { track: entry.track, starts: 0, seasonIds: [], driverCount: 0 };
+    }
+    const group = byTrack[entry.track];
+    group.starts += entry.starts;
+    group.driverCount += 1;
+    (entry.seasonIds || []).forEach((id) => {
+      if (!group.seasonIds.includes(id)) group.seasonIds.push(id);
+    });
+  });
+  return Object.values(byTrack)
+    .map((group) => ({ ...group, seasonCount: group.seasonIds.length }))
+    .sort((left, right) => normalizeInlineText(left.track).localeCompare(normalizeInlineText(right.track), undefined, { sensitivity: "base" }));
+}
+
+// Every driver's record at a single track, ranked. Default order is a career-at-track
+// ranking: wins, then podiums, then total points.
+function getTrackLeaderboard(aggregates, trackName) {
+  return (aggregates || [])
+    .filter((entry) => entry.track === trackName)
+    .sort((a, b) =>
+      (b.wins - a.wins) ||
+      (b.podiums - a.podiums) ||
+      (b.top5s - a.top5s) ||
+      (b.totalPoints - a.totalPoints) ||
+      ((a.avgFinish ?? Infinity) - (b.avgFinish ?? Infinity))
+    );
+}
+
+// Flat, chronologically ordered list of every race run at a track, one row per
+// driver-race. Backs the finish-distribution chart and the per-driver drill.
+function getTrackRaceResults(dataset, trackName) {
+  const out = [];
+  (dataset.seasonDetails || []).forEach((seasonDetail) => {
+    if (seasonDetail.isUpcoming) return;
+    (seasonDetail.venues || []).forEach((venue) => {
+      if (normalizeInlineText(venue.venueName || "") !== trackName) return;
+      (venue.rows || []).forEach((row) => {
+        const driver = normalizeInlineText(row.driver || "");
+        if (!driver) return;
+        (row.races || []).forEach((race) => {
+          const position = parseNumberish(race.position);
+          const markers = extractResultMarkers(race.position);
+          out.push({
+            driver,
+            seasonId: seasonDetail.seasonId,
+            venueNumber: venue.venueNumber,
+            raceNumber: race.number,
+            position,
+            rawPosition: normalizeInlineText(race.position || ""),
+            points: race.points || 0,
+            pole: markers.pole,
+            fastestLap: markers.fastestLap,
+            didStart: position != null,
+          });
+        });
+      });
+    });
+  });
+  return out.sort((a, b) =>
+    (getSeasonOrder(a.seasonId) - getSeasonOrder(b.seasonId)) ||
+    ((a.venueNumber || 0) - (b.venueNumber || 0)) ||
+    ((a.raceNumber || 0) - (b.raceNumber || 0))
+  );
+}
+
+// One driver's race-by-race history at a track (chronological).
+function getDriverTrackRaces(dataset, driver, trackName) {
+  const clean = normalizeInlineText(driver);
+  return getTrackRaceResults(dataset, trackName).filter((race) => race.driver === clean);
 }
 
 // Apply empirical Bayes shrinkage (k=5) to balance raw rates against sample size,
@@ -2022,7 +2121,9 @@ if (typeof module !== "undefined" && module.exports) {
     parseDecimal, parsePercent, buildEraLabel, splitCsvLike, parseWinnerList,
     groupBy, uniqueList, createLookup, deriveRate, deriveAverage,
     averageOf, sumOf, maxOf, normalizeAgainstMax,
-    buildTrackAggregates, applyBayesianShrinkage,
+    buildTrackAggregates, applyBayesianShrinkage, extractResultMarkers,
+    getTrackList, getTrackLeaderboard, getTrackRaceResults,
+    getDriverTrackRaces,
     getFilteredSeasonRecords, buildCareerAggregates, buildSeasonRanking,
     buildTeamAggregates, buildWccHistoryRows,
     isPlaceholderValue, normalizeCarSpec, makeSeasonDriverKey,

@@ -10,6 +10,8 @@ const {
   averageOf, sumOf, maxOf, normalizeAgainstMax,
   isPlaceholderValue, normalizeCarSpec, makeSeasonDriverKey,
   parseDataset,
+  buildTrackAggregates, extractResultMarkers, getTrackList, getTrackLeaderboard,
+  getTrackRaceResults, getDriverTrackRaces,
 } = data;
 
 // ---- Season ID utilities ----
@@ -496,5 +498,186 @@ describe("makeSeasonDriverKey", () => {
   it("creates consistent lookup keys", () => {
     expect(makeSeasonDriverKey("S1", "Josie")).toBe("S1::josie");
     expect(makeSeasonDriverKey("Season 18a", " **Toby** ")).toBe("S18a::toby");
+  });
+});
+
+// ---- Track analysis ----
+
+describe("extractResultMarkers", () => {
+  it("detects pole and fastest-lap tokens", () => {
+    expect(extractResultMarkers("1 (P,FL)")).toEqual({ pole: true, fastestLap: true });
+    expect(extractResultMarkers("3 (FL)")).toEqual({ pole: false, fastestLap: true });
+    expect(extractResultMarkers("6 (P)")).toEqual({ pole: true, fastestLap: false });
+  });
+
+  it("returns all-false for unmarked or missing cells", () => {
+    expect(extractResultMarkers("4")).toEqual({ pole: false, fastestLap: false });
+    expect(extractResultMarkers("DNS")).toEqual({ pole: false, fastestLap: false });
+    expect(extractResultMarkers("")).toEqual({ pole: false, fastestLap: false });
+    expect(extractResultMarkers(null)).toEqual({ pole: false, fastestLap: false });
+  });
+});
+
+describe("track aggregation", () => {
+  // Two seasons at the same track so a driver's record accumulates across seasons.
+  const TRACK_MD = `# Track Test League
+
+## Season Registry
+
+| Season | Type | Car | Venues | Races/Venue | WDC | WCC |
+| --- | --- | --- | --- | --- | --- | --- |
+| S1 | Formula | Tatuus FA01 | Suzuka | 2 | Josie | Josie + Toby |
+| S2 | Formula | Tatuus FA01 | Suzuka | 2 | Josie | Josie + Toby |
+
+## Weighted Score Formula
+
+Win% x 0.20 + Podium% x 0.20
+
+## Full Career Statistics
+
+| Driver | WDC | WCC | Wins | Podiums | Poles | FLs | Points | Races | Win% | Pod% | Pts/Race | FL% | Top5 | Top5% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Josie | 2 | 2 | 3 | 4 | 2 | 3 | 100 | 4 | 75.0% | 100.0% | 25.0 | 75.0% | 4 | 100.0% |
+| Toby | 0 | 2 | 1 | 4 | 1 | 1 | 80 | 4 | 25.0% | 100.0% | 20.0 | 25.0% | 4 | 100.0% |
+
+## CPI Rankings
+
+| Rank | Driver | CPI | Avg WS | Peak WS | Avg Pts Rate | Avg Top5 Rate | WDCs | WCCs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie | 1.400 | 0.700 | 0.900 | 80.0% | 100.0% | 2 | 2 |
+| 2 | Toby | 1.200 | 0.600 | 0.800 | 70.0% | 100.0% | 0 | 2 |
+
+## All-Time Weighted Score Rankings
+
+| Rank | Driver | Season | W.Score | Win% | Pod% | Top5% | Pts/Race | FL% | Pole% | PtsRate | Part. | WDC | WCC |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie | S1 | 0.9000 | 75.0% | 100.0% | 100.0% | 25.0 | 75.0% | 50.0% | 90.0% | 100.0% | Yes | Yes |
+| 2 | Toby | S1 | 0.4000 | 25.0% | 100.0% | 100.0% | 20.0 | 25.0% | 25.0% | 60.0% | 100.0% | | Yes |
+
+## Season 1 Results
+
+**Type:** Formula
+**Car:** Tatuus FA01
+**Venues:** Suzuka
+**Races Per Venue:** 2
+**WDC:** Josie
+**WCC:** Josie + Toby
+
+### Season Standings
+
+| Pos | Driver | Points | Wins | Podiums | Poles | FLs | Races | Part. | Pts Rate | Top 5 Rate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie **WDC** (WCC) | 50 | 1 | 2 | 1 | 2 | 2 | 100.0% | 90.0% | 100.0% |
+| 2 | Toby (WCC) | 40 | 1 | 2 | 1 | 1 | 2 | 100.0% | 80.0% | 100.0% |
+
+#### Venue 1: Suzuka
+
+| Driver | R1 Pos | R1 Pts | R2 Pos | R2 Pts | Day Total |
+| --- | --- | --- | --- | --- | --- |
+| Josie | 1 (P,FL) | 25 | 2 (FL) | 18 | 43 |
+| Toby | 2 | 18 | 1 (P) | 25 | 43 |
+
+## Season 2 Results
+
+**Type:** Formula
+**Car:** Tatuus FA01
+**Venues:** Suzuka
+**Races Per Venue:** 2
+**WDC:** Josie
+**WCC:** Josie + Toby
+
+### Season Standings
+
+| Pos | Driver | Points | Wins | Podiums | Poles | FLs | Races | Part. | Pts Rate | Top 5 Rate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Josie **WDC** (WCC) | 50 | 2 | 2 | 1 | 1 | 2 | 100.0% | 90.0% | 100.0% |
+| 2 | Toby (WCC) | 40 | 0 | 2 | 0 | 0 | 2 | 100.0% | 80.0% | 100.0% |
+
+#### Venue 1: Suzuka
+
+| Driver | R1 Pos | R1 Pts | R2 Pos | R2 Pts | Day Total |
+| --- | --- | --- | --- | --- | --- |
+| Josie | 1 (P) | 25 | 1 | 25 | 50 |
+| Toby | 3 | 15 | 2 | 18 | 33 |
+`;
+
+  const dataset = parseDataset("track.md", TRACK_MD, "test");
+  const aggregates = buildTrackAggregates(dataset);
+  const josie = aggregates.find((e) => e.driver === "Josie" && e.track === "Suzuka");
+  const toby = aggregates.find((e) => e.driver === "Toby" && e.track === "Suzuka");
+
+  it("accumulates starts, wins, podiums and points across seasons", () => {
+    expect(josie.starts).toBe(4);
+    expect(josie.wins).toBe(3); // R1 S1, R1 S2, R2 S2
+    expect(josie.podiums).toBe(4);
+    expect(josie.top5s).toBe(4);
+    expect(josie.totalPoints).toBe(93);
+  });
+
+  it("counts poles and fastest laps parsed from position markers", () => {
+    expect(josie.poles).toBe(2); // S1 R1 (P), S2 R1 (P)
+    expect(josie.fastestLaps).toBe(2); // S1 R1 (FL), S1 R2 (FL)
+    expect(toby.poles).toBe(1); // S1 R2 (P)
+    expect(toby.fastestLaps).toBe(0);
+  });
+
+  it("computes average finishing position", () => {
+    // Josie finishes: 1, 2, 1, 1 -> mean 1.25
+    expect(josie.avgFinish).toBeCloseTo(1.25, 5);
+    // Toby finishes: 2, 1, 3, 2 -> mean 2.0
+    expect(toby.avgFinish).toBeCloseTo(2.0, 5);
+  });
+
+  it("tracks the seasons a driver appeared at the venue", () => {
+    expect(josie.seasonIds.sort()).toEqual(["S1", "S2"]);
+  });
+
+  it("returns chronological per-race results with markers", () => {
+    const races = getTrackRaceResults(dataset, "Suzuka");
+    // 2 drivers x 2 seasons x 2 races = 8 race rows
+    expect(races.length).toBe(8);
+    // ordered S1 before S2
+    expect(races[0].seasonId).toBe("S1");
+    expect(races[races.length - 1].seasonId).toBe("S2");
+    const firstJosie = races.find((r) => r.driver === "Josie");
+    expect(firstJosie.pole).toBe(true);
+    expect(firstJosie.fastestLap).toBe(true);
+    expect(firstJosie.didStart).toBe(true);
+  });
+
+  it("filters race history to a single driver", () => {
+    const josieRaces = getDriverTrackRaces(dataset, "Josie", "Suzuka");
+    expect(josieRaces.length).toBe(4);
+    expect(josieRaces.every((r) => r.driver === "Josie")).toBe(true);
+    expect(josieRaces.map((r) => r.position)).toEqual([1, 2, 1, 1]);
+  });
+});
+
+describe("getTrackList", () => {
+  it("groups aggregates into distinct tracks sorted by name", () => {
+    const aggregates = [
+      { driver: "A", track: "Spa", starts: 4, seasonIds: ["S1", "S2"] },
+      { driver: "B", track: "Spa", starts: 2, seasonIds: ["S2"] },
+      { driver: "A", track: "Monza", starts: 3, seasonIds: ["S1"] },
+    ];
+    const list = getTrackList(aggregates);
+    expect(list.map((t) => t.track)).toEqual(["Monza", "Spa"]);
+    const spa = list.find((t) => t.track === "Spa");
+    expect(spa.starts).toBe(6);
+    expect(spa.driverCount).toBe(2);
+    expect(spa.seasonCount).toBe(2);
+  });
+});
+
+describe("getTrackLeaderboard", () => {
+  it("filters to one track and ranks by wins then podiums then points", () => {
+    const aggregates = [
+      { driver: "A", track: "Spa", wins: 1, podiums: 3, top5s: 3, totalPoints: 90, avgFinish: 2 },
+      { driver: "B", track: "Spa", wins: 3, podiums: 3, top5s: 3, totalPoints: 60, avgFinish: 1.5 },
+      { driver: "C", track: "Monza", wins: 5, podiums: 5, top5s: 5, totalPoints: 200, avgFinish: 1 },
+    ];
+    const rows = getTrackLeaderboard(aggregates, "Spa");
+    expect(rows.map((r) => r.driver)).toEqual(["B", "A"]);
+    expect(rows.every((r) => r.track === "Spa")).toBe(true);
   });
 });
