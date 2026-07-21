@@ -105,6 +105,10 @@ const state = {
     view: "list",
     trackLimit: 10,
   },
+  tracks: {
+    selectedTrack: "",
+    drillDriver: "",
+  },
   selectedDrivers: [],
   teams: {
     view: "totals",
@@ -117,7 +121,7 @@ const state = {
 };
 
 const refs = {};
-const ROUTE_TABS = ["seasons", "drivers", "compare", "teams"];
+const ROUTE_TABS = ["seasons", "drivers", "compare", "tracks", "teams"];
 let isApplyingHistory = false;
 
 document.addEventListener("DOMContentLoaded", init);
@@ -144,6 +148,7 @@ function cacheRefs() {
     "seasons-header", "seasons-filters", "seasons-content",
     "drivers-header", "drivers-filters", "drivers-content", "drivers-title",
     "compare-filters", "compare-content",
+    "tracks-filters", "tracks-content",
     "teams-filters", "teams-content",
   ].forEach((id) => {
     refs[id] = document.getElementById(id);
@@ -181,6 +186,10 @@ function applyRouteFromLocation() {
     state.drivers.view = route.driverView || "list";
   }
 
+  if (route.activeTab === "tracks") {
+    state.tracks.selectedTrack = route.selectedTrack || "";
+  }
+
   if (route.activeTab === "teams") {
     state.teams.view = route.teamView || "totals";
   }
@@ -207,6 +216,12 @@ function parseRouteHash(hash) {
       profileDriver: "",
       driverView: driverViews.includes(parts[1]) ? parts[1] : "list",
     };
+  }
+
+  if (activeTab === "tracks") {
+    // Tolerate a legacy "#tracks/leaderboard/<track>" shape by dropping the view segment.
+    const rest = parts[1] === "leaderboard" ? parts.slice(2) : parts.slice(1);
+    return { activeTab, selectedTrack: rest.length ? rest.join("/") : "" };
   }
 
   if (activeTab === "teams") {
@@ -239,6 +254,12 @@ function buildRouteHash() {
       return `#drivers/profile/${encodeRouteSegment(state.filters.profileDriver)}`;
     }
     return `#drivers/${encodeRouteSegment(state.drivers.view || "list")}`;
+  }
+
+  if (state.activeTab === "tracks") {
+    return state.tracks.selectedTrack
+      ? `#tracks/${encodeRouteSegment(state.tracks.selectedTrack)}`
+      : "#tracks";
   }
 
   if (state.activeTab === "teams") {
@@ -343,6 +364,9 @@ function renderActiveView() {
       break;
     case "compare":
       renderCompareView(dataset);
+      break;
+    case "tracks":
+      renderTracksView(dataset);
       break;
     case "teams":
       renderTeamsView(dataset);

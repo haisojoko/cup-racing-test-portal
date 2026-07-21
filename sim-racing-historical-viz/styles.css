@@ -1254,6 +1254,62 @@ button, input, select, textarea { font: inherit; }
 .mt-1 { margin-top: 1rem; }
 .mt-half { margin-top: 0.5rem; }
 .mb-1 { margin-bottom: 1rem; }
+.mb-half { margin-bottom: 0.5rem; }
+
+/* ---- Track record holders strip ---- */
+.track-holders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem 1.25rem;
+}
+.track-holder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+.track-holder__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.track-holder__name {
+  font-weight: 600;
+  color: var(--text);
+}
+.track-holder__value {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Track driver drill ---- */
+.drill-card { border: 1px solid var(--accent); box-shadow: 0 2px 12px rgba(13, 110, 253, 0.08); }
+.drill-card__at { font-weight: 400; color: var(--text-muted); font-size: 0.9em; }
+.drill-card__actions { display: flex; align-items: center; gap: 0.75rem; }
+.drill-link { font-size: 0.85rem; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.drill-link:hover { text-decoration: underline; }
+.drill-close {
+  border: none;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.drill-close:hover { background: var(--border); color: var(--text); }
+.drill-spark { width: 100%; overflow-x: auto; }
+.drill-spark svg { width: 100%; min-width: 320px; max-width: 640px; height: auto; }
+
+/* ---- Finish-position distribution ---- */
+.dist-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.dist-chart { width: 100%; min-width: 560px; height: auto; }
 
 /* ---- Responsive ---- */
 @media (max-width: 768px) {

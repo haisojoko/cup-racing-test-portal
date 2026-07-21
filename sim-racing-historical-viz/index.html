@@ -24,6 +24,7 @@
           <button class="nav-tab is-active" type="button" data-tab="seasons" role="tab" aria-selected="true">Seasons</button>
           <button class="nav-tab" type="button" data-tab="drivers" role="tab" aria-selected="false">Drivers</button>
           <button class="nav-tab" type="button" data-tab="compare" role="tab" aria-selected="false">Compare</button>
+          <button class="nav-tab" type="button" data-tab="tracks" role="tab" aria-selected="false">Tracks</button>
           <button class="nav-tab" type="button" data-tab="teams" role="tab" aria-selected="false">Teams</button>
         </nav>
       </header>
@@ -62,6 +63,15 @@
           <div id="compare-content"></div>
         </section>
 
+        <!-- Tracks view: track picker + per-track driver leaderboard -->
+        <section class="view" data-view="tracks" hidden>
+          <div class="view-header">
+            <h1 class="view-title">Tracks</h1>
+            <div class="view-filters" id="tracks-filters"></div>
+          </div>
+          <div id="tracks-content"></div>
+        </section>
+
         <!-- Teams view -->
         <section class="view" data-view="teams" hidden>
           <div class="view-header">
@@ -76,6 +86,7 @@
     <script src="scripts/data.js"></script>
     <script src="scripts/views-season.js"></script>
     <script src="scripts/views-analysis.js"></script>
+    <script src="scripts/views-tracks.js"></script>
     <script src="scripts/views-teams.js"></script>
     <script src="app.js"></script>
   </body>
