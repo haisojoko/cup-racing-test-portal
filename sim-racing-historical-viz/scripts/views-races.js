@@ -299,7 +299,7 @@ function renderEventScopedView(viewId, ev) {
     overtakes: (race, id) => buildOvertakesSection(race, id),
   }[viewId];
   const intro = viewId === "overtakes"
-    ? `<p class="race-note">Note: opening-lap (lap 1) passes are not counted — the source data only detects position changes from lap 2 onward, so start-line overtaking is missing. A “pass” is any on-track position swap, lapped traffic included.</p>`
+    ? `<p class="race-note">Opening-lap (lap 1) launch passes are counted only when the grid is trusted (high/medium confidence); low-confidence reverse or ambiguous grids show no lap-1 passes because the start order there is inferred from lap 1 itself. A “pass” is any on-track position swap, lapped traffic included.</p>`
     : "";
   const sections = raceIds.map((id) => perRace(ev.races[id], id)).join("");
   return `<div class="race-sections">${intro}${sections}</div>`;
