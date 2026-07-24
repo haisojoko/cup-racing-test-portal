@@ -1059,7 +1059,9 @@ function hydrateRaceTables(seasonData) {
         { key: "aBest", label: `${a} best lap`, rawHtml: true, render: (r) => nameCell(colorA)(r.aBest) },
         { key: "bBest", label: `${b} best lap`, rawHtml: true, render: (r) => nameCell(colorB)(r.bBest) },
         { key: "flDeltaMs", label: "Faster lap", rawHtml: true, render: deltaRender("flDeltaMs") },
-        { key: "paceDeltaMs", label: "Faster pace", rawHtml: true, render: deltaRender("paceDeltaMs") },
+        { key: "aPace", label: `${a} avg lap`, rawHtml: true, render: (r) => nameCell(colorA)(r.aPace) },
+        { key: "bPace", label: `${b} avg lap`, rawHtml: true, render: (r) => nameCell(colorB)(r.bPace) },
+        { key: "paceDeltaMs", label: "Faster avg", rawHtml: true, render: deltaRender("paceDeltaMs") },
         { key: "aOt", label: `${a} passes`, widthRem: 6 },
         { key: "bOt", label: `${b} passes`, widthRem: 6 },
       ];

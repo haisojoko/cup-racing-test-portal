@@ -230,6 +230,8 @@ describe("computeH2HRaceRows", () => {
     expect(rows.length).toBe(2); // both raced Monza + Sonoma
     const sonoma = rows.find((r) => r.race.includes("Sonoma"));
     expect(sonoma.flDeltaMs).toBe(-1500); // A best 90500 vs B 92000
+    expect(sonoma.aPace).toBe(93250);
+    expect(sonoma.bPace).toBe(94500);
     expect(sonoma.paceDeltaMs).toBe(-1250); // A 93250 vs B 94500
     expect(sonoma.aOt).toBe(2);
     expect(sonoma.bOt).toBe(0);
