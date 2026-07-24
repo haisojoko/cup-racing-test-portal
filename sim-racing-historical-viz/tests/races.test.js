@@ -7,11 +7,12 @@ globalThis.seriesColor = (i) => `color-${i}`;
 
 const races = require("../scripts/views-races.js");
 const {
-  isValidLap, fmtLap, lapTimeDomain, deltaCell,
+  isValidLap, fmtLap, lapTimeDomain, describeDelta,
   raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
   buildBattleSeries, laneTicks,
   computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
   computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
+  computeCrashMatrix,
 } = races;
 
 // ---- lap value helpers ----
@@ -86,6 +87,10 @@ const fixtureSeason = {
             { lap: 1, driver: "A", passed: "B" },
             { lap: 2, driver: "C", passed: "A" },
             { lap: 2, driver: "A", passed: "C" },
+          ],
+          contacts: [
+            { driver1: "A", driver2: "B", impactSpeed: 12 },
+            { driver1: "A", driver2: "C", impactSpeed: 5 },
           ],
         },
       },
@@ -195,6 +200,8 @@ describe("computeHeadToHead", () => {
     expect(h2h.races.length).toBe(2);
     expect(h2h.aTotalOt).toBe(2); // A made 2 passes in Sonoma R1
     expect(h2h.bTotalOt).toBe(0);
+    expect(h2h.aOutqual).toBe(1); // A faster than B in Sonoma qual
+    expect(h2h.bOutqual).toBe(0);
   });
 });
 
@@ -229,11 +236,26 @@ describe("computeH2HRaceRows", () => {
   });
 });
 
-describe("deltaCell", () => {
-  it("formats signed deltas with the leading driver", () => {
-    expect(deltaCell(null)).toBe("—");
-    expect(deltaCell(0)).toBe("even");
-    expect(deltaCell(-500)).toBe("−0.500s (A)");
-    expect(deltaCell(1250)).toBe("+1.250s (B)");
+describe("describeDelta", () => {
+  it("names the faster driver and the gap", () => {
+    expect(describeDelta(null, "Josie", "Toby")).toEqual({ text: "—", side: null });
+    expect(describeDelta(0, "Josie", "Toby")).toEqual({ text: "even", side: null });
+    expect(describeDelta(-500, "Josie", "Toby")).toEqual({ text: "Josie by 0.500s", side: "first" });
+    expect(describeDelta(1250, "Josie", "Toby")).toEqual({ text: "Toby by 1.250s", side: "second" });
+  });
+});
+
+describe("computeCrashMatrix", () => {
+  it("counts contact involvement per driver per race and totals", () => {
+    const model = computeCrashMatrix(fixtureSeason);
+    expect(model.totalContacts).toBe(2); // both in Sonoma R1
+    const a = model.rows.find((r) => r.driver === "A");
+    expect(a.total).toBe(2); // A in both contacts
+    const b = model.rows.find((r) => r.driver === "B");
+    expect(b.total).toBe(1);
+    // Monza had no contacts, so only Sonoma's column carries counts.
+    const sonomaCol = model.cols.find((c) => c.venue === "Sonoma").key;
+    expect(a[sonomaCol]).toBe(2);
+    expect(model.max).toBe(2);
   });
 });

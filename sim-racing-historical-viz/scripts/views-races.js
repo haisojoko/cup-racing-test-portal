@@ -24,6 +24,7 @@ const RACE_VIEWS = [
   { id: "overtakes", label: "Overtakes", scope: "event" },
   { id: "qualifying", label: "Qualifying Gaps", scope: "event" },
   { id: "h2h", label: "Head-to-Head", scope: "season" },
+  { id: "crashes", label: "Crashes", scope: "season" },
 ];
 
 const RACE_DISCLAIMER =
@@ -262,7 +263,7 @@ function renderRaceContent(seasonData) {
   const view = RACE_VIEWS.find((v) => v.id === state.races.view) || RACE_VIEWS[0];
   let body = "";
   if (view.scope === "season") {
-    body = renderH2HView(seasonData);
+    body = view.id === "crashes" ? renderCrashesView(seasonData) : renderH2HView(seasonData);
   } else if (view.id === "qualifying") {
     body = renderQualifyingView(seasonData);
   } else if (view.scope === "event") {
@@ -297,8 +298,11 @@ function renderEventScopedView(viewId, ev) {
     fastlap: (race, id) => buildFastLapSection(race, id),
     overtakes: (race, id) => buildOvertakesSection(race, id),
   }[viewId];
+  const intro = viewId === "overtakes"
+    ? `<p class="race-note">Note: opening-lap (lap 1) passes are not counted — the source data only detects position changes from lap 2 onward, so start-line overtaking is missing. A “pass” is any on-track position swap, lapped traffic included.</p>`
+    : "";
   const sections = raceIds.map((id) => perRace(ev.races[id], id)).join("");
-  return `<div class="race-sections">${sections}</div>`;
+  return `<div class="race-sections">${intro}${sections}</div>`;
 }
 
 function renderRaceScopedView(viewId, seasonData, race) {
@@ -759,25 +763,33 @@ function renderH2HView(seasonData) {
   const [a, b] = state.races.h2h;
 
   const pickers = [0, 1].map((slot) => {
+    const color = seriesColor(slot, 2);
     const opts = drivers
       .map((d) => `<option value="${escapeHtml(d)}" ${d === state.races.h2h[slot] ? "selected" : ""}>${escapeHtml(d)}</option>`)
       .join("");
-    return `<label class="inline-control"><span>Driver ${slot === 0 ? "A" : "B"}</span><select class="select" data-h2h-slot="${slot}">${opts}</select></label>`;
+    return `<label class="inline-control"><span class="h2h-swatch" style="background:${color}"></span><select class="select" data-h2h-slot="${slot}">${opts}</select></label>`;
   }).join("");
 
   const h2h = computeHeadToHead(seasonData, a, b);
   const colorA = seriesColor(0, 2), colorB = seriesColor(1, 2);
 
+  // Each card names both drivers and highlights the leader, so a value is never
+  // an unlabelled "A"/"B".
   const metric = (label, va, vb, better) => {
     const aWin = better === "low" ? cmpLow(va, vb) : better === "high" ? cmpHigh(va, vb) : false;
     const bWin = better === "low" ? cmpLow(vb, va) : better === "high" ? cmpHigh(vb, va) : false;
+    const side = (name, val, win, color) => `
+      <span class="h2h-side ${win ? "is-better" : ""}">
+        <span class="h2h-side__name" style="color:${color}">${escapeHtml(name)}</span>
+        <span class="h2h-side__val">${escapeHtml(String(val))}</span>
+      </span>`;
     return `
       <div class="h2h-metric">
         <div class="h2h-metric__label">${escapeHtml(label)}</div>
         <div class="h2h-metric__vals">
-          <span class="${aWin ? "is-better" : ""}" style="color:${colorA}">${escapeHtml(String(va))}</span>
+          ${side(a, va, aWin, colorA)}
           <span class="h2h-metric__vs">vs</span>
-          <span class="${bWin ? "is-better" : ""}" style="color:${colorB}">${escapeHtml(String(vb))}</span>
+          ${side(b, vb, bWin, colorB)}
         </div>
       </div>`;
   };
@@ -785,14 +797,11 @@ function renderH2HView(seasonData) {
   const cards = [
     metric("Races together", h2h.together, h2h.together, "eq"),
     metric("Finished ahead", h2h.aAhead, h2h.bAhead, "high"),
+    metric("Out-qualified", h2h.aOutqual, h2h.bOutqual, "high"),
     metric("Avg finish", h2h.aAvgFinish ?? "—", h2h.bAvgFinish ?? "—", "low"),
     metric("Wins", h2h.aWins, h2h.bWins, "high"),
-    metric("Best lap", fmtLap(h2h.aBestLap), fmtLap(h2h.bBestLap), "low"),
-    metric("Avg race pace", fmtLap(h2h.aAvgPace), fmtLap(h2h.bAvgPace), "low"),
     metric("Total overtakes", h2h.aTotalOt, h2h.bTotalOt, "high"),
   ].join("");
-
-  const legend = `<div class="h2h-legend"><span class="legend-item"><span class="legend-swatch" style="background:${colorA}"></span>A — ${escapeHtml(a)}</span><span class="legend-item"><span class="legend-swatch" style="background:${colorB}"></span>B — ${escapeHtml(b)}</span></div>`;
 
   return `
     <div class="card">
@@ -801,7 +810,7 @@ function renderH2HView(seasonData) {
         <div class="view-filters">${pickers}</div>
       </div>
       <div class="card__body">
-        ${legend}
+        <p class="subtle-text">Comparing <strong style="color:${colorA}">${escapeHtml(a)}</strong> vs <strong style="color:${colorB}">${escapeHtml(b)}</strong> across ${escapeHtml(seasonData.season || state.races.seasonId)}. Each card highlights the leader.</p>
         <div class="h2h-grid mt-1">${cards}</div>
       </div>
     </div>
@@ -824,7 +833,14 @@ function overtakesMadeBy(race, driver) {
 
 function computeHeadToHead(seasonData, a, b) {
   const races = collectSeasonRaces(seasonData);
-  const out = { races: [], together: 0, aAhead: 0, bAhead: 0, aWins: 0, bWins: 0, aTotalOt: 0, bTotalOt: 0 };
+  const out = { races: [], together: 0, aAhead: 0, bAhead: 0, aWins: 0, bWins: 0, aTotalOt: 0, bTotalOt: 0, aOutqual: 0, bOutqual: 0 };
+
+  // Qualifying head-to-head: who set the faster best lap, session by session.
+  for (const row of computeH2HQualRows(seasonData, a, b)) {
+    if (row.deltaMs == null) continue;
+    if (row.deltaMs < 0) out.aOutqual += 1; else if (row.deltaMs > 0) out.bOutqual += 1;
+  }
+
   const aFin = [], bFin = [], aPace = [], bPace = [];
   let aBest = Infinity, bBest = Infinity;
   for (const rc of races) {
@@ -910,12 +926,77 @@ function avgPaceOf(race, driver) {
   return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
 }
 
-// Signed delta cell: "+0.234 (A)" / "−0.100 (B)" with the leader implied by sign.
-function deltaCell(deltaMs) {
-  if (deltaMs == null) return "—";
-  if (deltaMs === 0) return "even";
-  const who = deltaMs < 0 ? "A" : "B";
-  return `${deltaMs < 0 ? "−" : "+"}${(Math.abs(deltaMs) / 1000).toFixed(3)}s (${who})`;
+// Describe a gap by naming who is faster, e.g. { text: "Josie by 0.234s",
+// side: "first" }. `first` is faster when deltaMs < 0 (first - second).
+function describeDelta(deltaMs, first, second) {
+  if (deltaMs == null) return { text: "—", side: null };
+  if (deltaMs === 0) return { text: "even", side: null };
+  const mag = (Math.abs(deltaMs) / 1000).toFixed(3);
+  return deltaMs < 0
+    ? { text: `${first} by ${mag}s`, side: "first" }
+    : { text: `${second} by ${mag}s`, side: "second" };
+}
+
+// ---------------------------------------------------------------------------
+// 8. Crashes (season scope) — contacts per driver per race, all on one page
+// ---------------------------------------------------------------------------
+
+function renderCrashesView(seasonData) {
+  const model = computeCrashMatrix(seasonData);
+  if (!model.rows.length) return renderEmptyStateMarkup("No contact data for this season.");
+  return `
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">Crashes — contacts per driver, race by race</h3>
+        <span class="badge">${model.totalContacts} contacts</span>
+      </div>
+      <div class="card__body">
+        <div id="crash-matrix-table"></div>
+        <p class="subtle-text mt-1">Each cell counts how many contacts a driver was involved in that race (both cars in a collision are counted). Columns are venue.race; darker = more contacts. A high count is not necessarily fault — it just flags incident-heavy races. Click a column to sort.</p>
+      </div>
+    </div>`;
+}
+
+// Build a driver × race grid of contact involvement counts for the season.
+function computeCrashMatrix(seasonData) {
+  const races = collectSeasonRaces(seasonData);
+  const cols = races.map((rc) => ({ key: `r_${rc.venueOrder}_${rc.raceId}`, label: `${rc.venueOrder}.${rc.raceId}`, venue: rc.venue }));
+  const drivers = seasonDriverList(seasonData);
+  const byDriver = new Map(drivers.map((d) => [d, { driver: d, total: 0 }]));
+
+  let max = 0;
+  let totalContacts = 0;
+  races.forEach((rc, i) => {
+    const key = cols[i].key;
+    for (const d of drivers) (byDriver.get(d))[key] = 0;
+    for (const c of rc.race.contacts || []) {
+      totalContacts += 1;
+      for (const who of [c.driver1, c.driver2]) {
+        const row = byDriver.get(who);
+        if (!row) continue;
+        row[key] += 1;
+        row.total += 1;
+        max = Math.max(max, row[key]);
+      }
+    }
+  });
+
+  const rows = [...byDriver.values()].filter((r) => r.total > 0).sort((a, b) => b.total - a.total || a.driver.localeCompare(b.driver));
+  return { cols, rows, max, totalContacts };
+}
+
+function crashColumns(model) {
+  const cell = (key) => (r) => {
+    const n = r[key] || 0;
+    if (!n) return `<span class="crash-cell">·</span>`;
+    const alpha = model.max ? 0.12 + 0.6 * (n / model.max) : 0.3;
+    return `<span class="crash-cell" style="background:rgba(220,53,69,${alpha.toFixed(2)})">${n}</span>`;
+  };
+  return [
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+    { key: "total", label: "Total", widthRem: 4.5 },
+    ...model.cols.map((c) => ({ key: c.key, label: c.label, widthRem: 3, rawHtml: true, render: cell(c.key) })),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -954,13 +1035,20 @@ function hydrateRaceTables(seasonData) {
     }
   } else if (view === "h2h") {
     const [a, b] = state.races.h2h;
+    const colorA = seriesColor(0, 2), colorB = seriesColor(1, 2);
+    const nameCell = (color) => (v) => `<span style="color:${color};font-weight:600">${escapeHtml(fmtLap(v))}</span>`;
+    const deltaRender = (key) => (r) => {
+      const d = describeDelta(r[key], a, b);
+      const color = d.side === "first" ? colorA : d.side === "second" ? colorB : "";
+      return color ? `<span style="color:${color};font-weight:600">${escapeHtml(d.text)}</span>` : escapeHtml(d.text);
+    };
     if (document.getElementById("h2h-qual-table")) {
       const qualRows = computeH2HQualRows(seasonData, a, b);
       const qualCols = [
         { key: "session", label: "Session", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
-        { key: "aMs", label: `A · ${a}`, render: (r) => fmtLap(r.aMs) },
-        { key: "bMs", label: `B · ${b}`, render: (r) => fmtLap(r.bMs) },
-        { key: "deltaMs", label: "Gap", render: (r) => deltaCell(r.deltaMs) },
+        { key: "aMs", label: `${a} best`, rawHtml: true, render: (r) => nameCell(colorA)(r.aMs) },
+        { key: "bMs", label: `${b} best`, rawHtml: true, render: (r) => nameCell(colorB)(r.bMs) },
+        { key: "deltaMs", label: "Faster", rawHtml: true, render: deltaRender("deltaMs") },
       ];
       renderSortableTable("h2h-qual-table", qualCols, qualRows, { compact: true });
     }
@@ -968,14 +1056,20 @@ function hydrateRaceTables(seasonData) {
       const raceRows = computeH2HRaceRows(seasonData, a, b);
       const raceCols = [
         { key: "race", label: "Race", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
-        { key: "aBest", label: `FL · ${a}`, render: (r) => fmtLap(r.aBest) },
-        { key: "bBest", label: `FL · ${b}`, render: (r) => fmtLap(r.bBest) },
-        { key: "flDeltaMs", label: "FL gap", render: (r) => deltaCell(r.flDeltaMs) },
-        { key: "paceDeltaMs", label: "Pace Δ", render: (r) => deltaCell(r.paceDeltaMs) },
-        { key: "aOt", label: `OT · ${a}`, widthRem: 5 },
-        { key: "bOt", label: `OT · ${b}`, widthRem: 5 },
+        { key: "aBest", label: `${a} best lap`, rawHtml: true, render: (r) => nameCell(colorA)(r.aBest) },
+        { key: "bBest", label: `${b} best lap`, rawHtml: true, render: (r) => nameCell(colorB)(r.bBest) },
+        { key: "flDeltaMs", label: "Faster lap", rawHtml: true, render: deltaRender("flDeltaMs") },
+        { key: "paceDeltaMs", label: "Faster pace", rawHtml: true, render: deltaRender("paceDeltaMs") },
+        { key: "aOt", label: `${a} passes`, widthRem: 6 },
+        { key: "bOt", label: `${b} passes`, widthRem: 6 },
       ];
       renderSortableTable("h2h-race-table", raceCols, raceRows, { compact: true });
+    }
+  } else if (view === "crashes") {
+    if (document.getElementById("crash-matrix-table")) {
+      const model = computeCrashMatrix(seasonData);
+      // Rows arrive pre-sorted by total (desc); headers re-sort on click.
+      renderSortableTable("crash-matrix-table", crashColumns(model), model.rows, { compact: true });
     }
   }
 }
@@ -1036,11 +1130,12 @@ function lapTimeDomain(values) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    isValidLap, fmtLap, lapTimeDomain, deltaCell,
+    isValidLap, fmtLap, lapTimeDomain, describeDelta,
     raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
     sortedEvents, sortedRaceIds,
     buildBattleSeries, laneTicks,
     computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
     computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
+    computeCrashMatrix,
   };
 }

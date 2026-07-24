@@ -1607,3 +1607,62 @@ button, input, select, textarea { font: inherit; }
   font-size: 0.8rem;
   font-weight: 600;
 }
+
+/* Head-to-head: named, stacked comparison values */
+.h2h-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+}
+
+.h2h-side__name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h2h-side__val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.h2h-side.is-better .h2h-side__val {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.h2h-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Overtakes lap-1 caveat / generic race note */
+.race-note {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.7rem;
+  margin: 0;
+}
+
+/* Crashes matrix cells */
+.crash-cell {
+  display: block;
+  text-align: center;
+  border-radius: 3px;
+  padding: 0.12rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.crash-cell:not([style]) {
+  color: var(--text-muted);
+}
