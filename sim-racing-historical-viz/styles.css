@@ -1510,6 +1510,28 @@ button, input, select, textarea { font: inherit; }
   color: var(--text);
 }
 
+/* Grid → Flag rows: same diverging bars as the overtake chart, plus a trailing
+   "P5 → P2" readout, so they need a third column .ot-row does not have. */
+.gtf-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr 9.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.gtf-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.gtf-qual {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
 .ot-side--made .ot-num { left: 0.4rem; }
 .ot-side--suffered .ot-num { right: 0.4rem; }
 
