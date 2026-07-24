@@ -1366,3 +1366,192 @@ button, input, select, textarea { font: inherit; }
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Race Deep Dive ---- */
+.badge--muted {
+  background: rgba(136, 136, 136, 0.12);
+  color: var(--text-muted);
+}
+
+/* Horizontal gap bars (fastest laps, qualifying, consistency) */
+.hbar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.hbar-row {
+  display: grid;
+  grid-template-columns: 1.5rem 8rem 1fr 5.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.hbar-chart .hbar-row:not(:has(.hbar-rank)) {
+  grid-template-columns: 8rem 1fr 5.5rem;
+}
+
+.hbar-rank {
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.hbar-label {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hbar-track {
+  position: relative;
+  height: 1.35rem;
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.hbar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: var(--radius-sm);
+  opacity: 0.85;
+}
+
+.hbar-inbar {
+  position: absolute;
+  left: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.hbar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* Overtakes: mirrored made / suffered bars */
+.ot-legend {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.6rem;
+}
+
+.ot-key {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+
+.ot-key--made { background: #198754; }
+.ot-key--suffered { background: #dc3545; }
+
+.ot-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ot-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.ot-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.ot-side {
+  position: relative;
+  height: 1.25rem;
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ot-side--made { direction: rtl; }
+
+.ot-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0.8;
+}
+
+.ot-side--made .ot-fill { right: 0; background: #198754; }
+.ot-side--suffered .ot-fill { left: 0; background: #dc3545; }
+
+.ot-num {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.ot-side--made .ot-num { left: 0.4rem; }
+.ot-side--suffered .ot-num { right: 0.4rem; }
+
+/* Head-to-head summary grid */
+.h2h-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem;
+}
+
+.h2h-metric {
+  background: var(--surface-hover);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  text-align: center;
+}
+
+.h2h-metric__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.h2h-metric__vals {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.h2h-metric__vals .is-better {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.h2h-metric__vs {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}

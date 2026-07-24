@@ -109,6 +109,17 @@ const state = {
     selectedTrack: "",
     drillDriver: "",
   },
+  races: {
+    index: null,
+    seasonData: {},
+    seasonId: null,
+    eventId: null,
+    raceId: null,
+    qualId: null,
+    lapDriver: null,
+    view: "battle",
+    h2h: [],
+  },
   selectedDrivers: [],
   teams: {
     view: "totals",
@@ -121,7 +132,7 @@ const state = {
 };
 
 const refs = {};
-const ROUTE_TABS = ["seasons", "drivers", "compare", "tracks", "teams"];
+const ROUTE_TABS = ["seasons", "drivers", "compare", "tracks", "races", "teams"];
 let isApplyingHistory = false;
 
 document.addEventListener("DOMContentLoaded", init);
@@ -149,6 +160,7 @@ function cacheRefs() {
     "drivers-header", "drivers-filters", "drivers-content", "drivers-title",
     "compare-filters", "compare-content",
     "tracks-filters", "tracks-content",
+    "races-filters", "races-content",
     "teams-filters", "teams-content",
   ].forEach((id) => {
     refs[id] = document.getElementById(id);
@@ -267,6 +279,7 @@ function buildRouteHash() {
   }
 
   if (state.activeTab === "compare") return "#compare";
+  if (state.activeTab === "races") return "#races";
   return "#seasons";
 }
 
@@ -367,6 +380,9 @@ function renderActiveView() {
       break;
     case "tracks":
       renderTracksView(dataset);
+      break;
+    case "races":
+      renderRacesView();
       break;
     case "teams":
       renderTeamsView(dataset);

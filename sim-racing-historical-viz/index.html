@@ -25,6 +25,7 @@
           <button class="nav-tab" type="button" data-tab="drivers" role="tab" aria-selected="false">Drivers</button>
           <button class="nav-tab" type="button" data-tab="compare" role="tab" aria-selected="false">Compare</button>
           <button class="nav-tab" type="button" data-tab="tracks" role="tab" aria-selected="false">Tracks</button>
+          <button class="nav-tab" type="button" data-tab="races" role="tab" aria-selected="false">Races</button>
           <button class="nav-tab" type="button" data-tab="teams" role="tab" aria-selected="false">Teams</button>
         </nav>
       </header>
@@ -72,6 +73,15 @@
           <div id="tracks-content"></div>
         </section>
 
+        <!-- Races view: per-race deep dive (position battle, lap times, pace, overtakes, qualifying, head-to-head) -->
+        <section class="view" data-view="races" hidden>
+          <div class="view-header">
+            <h1 class="view-title">Race Deep Dive</h1>
+            <div class="view-filters" id="races-filters"></div>
+          </div>
+          <div id="races-content"></div>
+        </section>
+
         <!-- Teams view -->
         <section class="view" data-view="teams" hidden>
           <div class="view-header">
@@ -88,6 +98,7 @@
     <script src="scripts/views-analysis.js"></script>
     <script src="scripts/views-tracks.js"></script>
     <script src="scripts/views-teams.js"></script>
+    <script src="scripts/views-races.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
