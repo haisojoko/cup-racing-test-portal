@@ -22,6 +22,7 @@ const RACE_VIEWS = [
   { id: "fastlap", label: "Fastest Laps", scope: "event" },
   { id: "pace", label: "Pace & Consistency", scope: "race" },
   { id: "overtakes", label: "Overtakes", scope: "event" },
+  { id: "gridtoflag", label: "Grid → Flag", scope: "event" },
   { id: "qualifying", label: "Qualifying Gaps", scope: "event" },
   { id: "h2h", label: "Head-to-Head", scope: "season" },
   { id: "crashes", label: "Crashes", scope: "season" },
@@ -297,10 +298,13 @@ function renderEventScopedView(viewId, ev) {
     battle: (race, id) => buildBattleSection(race, id),
     fastlap: (race, id) => buildFastLapSection(race, id),
     overtakes: (race, id) => buildOvertakesSection(race, id),
+    gridtoflag: (race, id) => buildGridToFlagSection(race, id),
   }[viewId];
   const intro = viewId === "overtakes"
     ? `<p class="race-note">Opening-lap (lap 1) launch passes are counted only when the grid is trusted (high/medium confidence); low-confidence reverse or ambiguous grids show no lap-1 passes because the start order there is inferred from lap 1 itself. A “pass” is any on-track position swap, lapped traffic included.</p>`
-    : "";
+    : viewId === "gridtoflag"
+      ? `<p class="race-note">Places gained or lost between the actual starting slot and the chequered flag. Where the race did not start in qualifying order — reverse grids especially — the qualifying slot is shown alongside so the two are never confused. Drivers with no recorded start or no classified finish are omitted.</p>`
+      : "";
   const sections = raceIds.map((id) => perRace(ev.races[id], id)).join("");
   return `<div class="race-sections">${intro}${sections}</div>`;
 }
@@ -605,7 +609,7 @@ function renderPaceView(seasonData, race) {
       <div class="card__body">
         ${buildConsistencyBarsHtml(rows)}
         <div class="mt-1" id="race-pace-table"></div>
-        <p class="subtle-text mt-1">Ranked by average clean-lap pace. "Best→Slowest" is the spread across a driver's valid laps — smaller is more consistent. Click a column to sort.</p>
+        <p class="subtle-text mt-1">Ranked by average clean-lap pace. Lap 1 and laps slower than 120% of a driver's median are excluded throughout. "Best→Slowest" is the gap between a driver's quickest and slowest counted lap, so one scrappy lap moves it a lot; "Deviation" is how far a typical lap sits from that driver's own average, which is the steadier read on consistency. Click a column to sort.</p>
       </div>
     </div>`;
 }
@@ -618,13 +622,27 @@ function computePaceRows(race) {
   for (const r of result) {
     const d = r.driver;
     if (!d) continue;
-    const valid = (laps[d] || []).filter(isValidLap);
+    const pool = cleanLapPool(laps[d]);
     const p = pace[d] || {};
-    const avg = p.avgMs != null ? p.avgMs : (valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null);
-    const best = p.bestMs != null ? p.bestMs : (valid.length ? Math.min(...valid) : null);
+    const avg = p.avgMs != null ? p.avgMs : (pool.length ? pool.reduce((a, b) => a + b, 0) / pool.length : null);
+    const best = p.bestMs != null ? p.bestMs : (pool.length ? Math.min(...pool) : null);
     if (avg == null || best == null) continue;
-    const worst = valid.length ? Math.max(...valid) : best;
-    rows.push({ driver: d, avgMs: Math.round(avg), bestMs: best, worstMs: worst, spreadMs: worst - best, lapsUsed: p.lapsUsed != null ? p.lapsUsed : valid.length });
+    // Slowest is taken from the same cleaned pool as best and avg. Reading it
+    // off the raw lap list instead paired a clean best with a lap-1 or
+    // off-track worst, which made the spread a measure of a driver's single
+    // worst lap rather than of their consistency.
+    const worst = pool.length ? Math.max(...pool) : best;
+    const dev = lapDeviation(pool);
+    rows.push({
+      driver: d,
+      avgMs: Math.round(avg),
+      bestMs: best,
+      worstMs: worst,
+      spreadMs: worst - best,
+      stdevMs: dev.stdevMs == null ? null : Math.round(dev.stdevMs),
+      cvPct: dev.cvPct,
+      lapsUsed: p.lapsUsed != null ? p.lapsUsed : pool.length,
+    });
   }
   rows.sort((a, b) => a.avgMs - b.avgMs);
   const lead = rows.length ? rows[0].avgMs : 0;
@@ -640,23 +658,28 @@ function paceColumns() {
     { key: "bestMs", label: "Best", render: (r) => fmtLap(r.bestMs) },
     { key: "worstMs", label: "Slowest", render: (r) => fmtLap(r.worstMs) },
     { key: "spreadMs", label: "Best→Slowest", render: (r) => `${(r.spreadMs / 1000).toFixed(3)}s` },
+    { key: "stdevMs", label: "Deviation", render: (r) => fmtDeviation(r.stdevMs) },
     { key: "gapMs", label: "Gap to best avg", render: (r) => (r.gapMs === 0 ? "—" : `+${(r.gapMs / 1000).toFixed(3)}s`) },
     { key: "lapsUsed", label: "Laps", widthRem: 4 },
   ];
 }
 
 function buildConsistencyBarsHtml(rows) {
-  const maxSpread = Math.max(...rows.map((r) => r.spreadMs), 1);
-  const bars = rows.map((r) => {
-    const pct = Math.round((r.spreadMs / maxSpread) * 100);
+  // Ranked by deviation, not by pace, so the steadiest driver leads the chart
+  // even if they were not the quickest.
+  const scored = rows.filter((r) => r.stdevMs != null).sort((a, b) => a.stdevMs - b.stdevMs);
+  if (!scored.length) return "";
+  const maxDev = Math.max(...scored.map((r) => r.stdevMs), 1);
+  const bars = scored.map((r, i) => {
+    const pct = Math.round((r.stdevMs / maxDev) * 100);
     return `
       <div class="hbar-row">
         <span class="hbar-label" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
-        <span class="hbar-track"><span class="hbar-fill" style="width:${pct}%;background:${seriesColor(r.rank - 1, rows.length)}"></span></span>
-        <span class="hbar-value">${(r.spreadMs / 1000).toFixed(3)}s</span>
+        <span class="hbar-track"><span class="hbar-fill" style="width:${pct}%;background:${seriesColor(i, scored.length)}"></span></span>
+        <span class="hbar-value">${escapeHtml(fmtDeviation(r.stdevMs))}</span>
       </div>`;
   }).join("");
-  return `<div class="hbar-chart"><div class="subtle-text" style="margin-bottom:0.4rem">Lap-time spread (consistency) — shorter is steadier</div>${bars}</div>`;
+  return `<div class="hbar-chart"><div class="subtle-text" style="margin-bottom:0.4rem">Lap-time deviation from each driver's own average — shorter is steadier</div>${bars}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +723,89 @@ function computeOvertakeTallies(race) {
   const rows = Object.values(tally);
   rows.forEach((r) => { r.net = r.made - r.suffered; });
   rows.sort((a, b) => b.made - a.made || a.suffered - b.suffered || a.driver.localeCompare(b.driver));
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// 5b. Grid → Flag (per event)
+// ---------------------------------------------------------------------------
+
+function buildGridToFlagSection(race, raceId) {
+  const rows = computeGridToFlagRows(race);
+  const moved = rows.filter((r) => r.moved != null);
+  const anyReversed = moved.some((r) => r.qualPos != null && r.qualPos !== r.startPos);
+
+  const body = moved.length ? (() => {
+    const maxVal = Math.max(...moved.map((r) => Math.abs(r.moved)), 1);
+    // Reuses the overtake chart's diverging bar parts: green leftward for
+    // places gained, red rightward for places lost.
+    const bars = moved.map((r) => {
+      const gained = r.moved > 0 ? r.moved : 0;
+      const lost = r.moved < 0 ? -r.moved : 0;
+      const qualNote = r.qualPos != null && r.qualPos !== r.startPos
+        ? `<span class="gtf-qual">qual P${r.qualPos}</span>`
+        : "";
+      return `
+        <div class="gtf-row">
+          <span class="hbar-label" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
+          <span class="ot-bars">
+            <span class="ot-side ot-side--made"><span class="ot-fill" style="width:${(gained / maxVal) * 100}%"></span><span class="ot-num">${gained || ""}</span></span>
+            <span class="ot-side ot-side--suffered"><span class="ot-fill" style="width:${(lost / maxVal) * 100}%"></span><span class="ot-num">${lost || ""}</span></span>
+          </span>
+          <span class="gtf-value">P${r.startPos} &rarr; P${r.finishPos}${qualNote}</span>
+        </div>`;
+    }).join("");
+    const reverseNote = anyReversed
+      ? `<p class="race-note">This race did not start in qualifying order, so "qual P" is shown where the two differ. Bars measure movement from the actual starting slot; a driver who qualified on pole and was reversed to the back can gain a lot of places here without beating anyone they had not already beaten in qualifying.</p>`
+      : "";
+    return `
+      <div class="ot-legend"><span><span class="ot-key ot-key--made"></span>Places gained</span><span><span class="ot-key ot-key--suffered"></span>Places lost</span></div>
+      <div class="ot-chart">${bars}</div>
+      ${reverseNote}`;
+  })() : renderEmptyStateMarkup("No starting-grid data for this race.");
+
+  const net = moved.reduce((sum, r) => sum + Math.max(r.moved, 0), 0);
+  return `
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">Race ${escapeHtml(raceId)} — Grid &rarr; Flag</h3>
+        <span class="badge">${net} places gained</span>
+        ${raceHeaderBadges(race)}
+      </div>
+      <div class="card__body">${body}</div>
+    </div>`;
+}
+
+// Movement from the actual starting slot to the flag, with the qualifying slot
+// carried alongside. `qualVsRace` in the dataset is measured from qualifying
+// order, which on a reverse grid is not where the driver actually started —
+// so `moved` is derived from race.grid and the qual figure is kept as context.
+function computeGridToFlagRows(race) {
+  const gridPos = {};
+  (Array.isArray(race.grid) ? race.grid : []).forEach((d, i) => {
+    if (d && gridPos[d] == null) gridPos[d] = i + 1;
+  });
+  const qvr = race.qualVsRace || {};
+  const rows = [];
+  for (const r of race.result || []) {
+    const d = r.driver;
+    if (!d || r.position == null) continue;
+    const startPos = gridPos[d] != null ? gridPos[d] : null;
+    const q = qvr[d] || null;
+    rows.push({
+      driver: d,
+      startPos,
+      finishPos: r.position,
+      moved: startPos != null ? startPos - r.position : null,
+      qualPos: q ? q.qualPosition : null,
+      qualDelta: q ? q.delta : null,
+    });
+  }
+  rows.sort((x, y) => {
+    const mx = x.moved == null ? -Infinity : x.moved;
+    const my = y.moved == null ? -Infinity : y.moved;
+    return my - mx || x.finishPos - y.finishPos;
+  });
   return rows;
 }
 
@@ -775,13 +881,16 @@ function renderH2HView(seasonData) {
 
   // Each card names both drivers and highlights the leader, so a value is never
   // an unlabelled "A"/"B".
-  const metric = (label, va, vb, better) => {
+  // `fmt` formats for display only — the better-side comparison always runs on
+  // the raw numbers, so a formatted value never breaks the highlight.
+  const metric = (label, va, vb, better, fmt) => {
     const aWin = better === "low" ? cmpLow(va, vb) : better === "high" ? cmpHigh(va, vb) : false;
     const bWin = better === "low" ? cmpLow(vb, va) : better === "high" ? cmpHigh(vb, va) : false;
+    const show = (v) => (fmt && typeof v === "number" ? fmt(v) : String(v));
     const side = (name, val, win, color) => `
       <span class="h2h-side ${win ? "is-better" : ""}">
         <span class="h2h-side__name" style="color:${color}">${escapeHtml(name)}</span>
-        <span class="h2h-side__val">${escapeHtml(String(val))}</span>
+        <span class="h2h-side__val">${escapeHtml(show(val))}</span>
       </span>`;
     return `
       <div class="h2h-metric">
@@ -801,6 +910,7 @@ function renderH2HView(seasonData) {
     metric("Avg finish", h2h.aAvgFinish ?? "—", h2h.bAvgFinish ?? "—", "low"),
     metric("Wins", h2h.aWins, h2h.bWins, "high"),
     metric("Total overtakes", h2h.aTotalOt, h2h.bTotalOt, "high"),
+    metric("Avg lap deviation", h2h.aAvgDevPct ?? "—", h2h.bAvgDevPct ?? "—", "low", (v) => `${v.toFixed(2)}%`),
   ].join("");
 
   return `
@@ -810,7 +920,7 @@ function renderH2HView(seasonData) {
         <div class="view-filters">${pickers}</div>
       </div>
       <div class="card__body">
-        <p class="subtle-text">Comparing <strong style="color:${colorA}">${escapeHtml(a)}</strong> vs <strong style="color:${colorB}">${escapeHtml(b)}</strong> across ${escapeHtml(seasonData.season || state.races.seasonId)}. Each card highlights the leader.</p>
+        <p class="subtle-text">Comparing <strong style="color:${colorA}">${escapeHtml(a)}</strong> vs <strong style="color:${colorB}">${escapeHtml(b)}</strong> across ${escapeHtml(seasonData.season || state.races.seasonId)}. Each card highlights the leader. "Avg lap deviation" is how far a typical lap sits from the driver's own average for that race, as a percentage of it, averaged over every race they finished — lower is steadier, and the percentage keeps short and long circuits comparable.</p>
         <div class="h2h-grid mt-1">${cards}</div>
       </div>
     </div>
@@ -841,7 +951,7 @@ function computeHeadToHead(seasonData, a, b) {
     if (row.deltaMs < 0) out.aOutqual += 1; else if (row.deltaMs > 0) out.bOutqual += 1;
   }
 
-  const aFin = [], bFin = [], aPace = [], bPace = [];
+  const aFin = [], bFin = [], aPace = [], bPace = [], aDev = [], bDev = [];
   let aBest = Infinity, bBest = Infinity;
   for (const rc of races) {
     const posOf = (d) => {
@@ -851,8 +961,8 @@ function computeHeadToHead(seasonData, a, b) {
     const aPos = posOf(a), bPos = posOf(b);
     if (aPos == null && bPos == null) continue;
     out.races.push({ venue: rc.venue, venueOrder: rc.venueOrder, raceId: rc.raceId, aPos, bPos });
-    if (aPos != null) { aFin.push(aPos); if (aPos === 1) out.aWins += 1; const bl = bestLapOf(rc.race, a); if (isValidLap(bl)) aBest = Math.min(aBest, bl); const ap = avgPaceOf(rc.race, a); if (ap) aPace.push(ap); out.aTotalOt += overtakesMadeBy(rc.race, a); }
-    if (bPos != null) { bFin.push(bPos); if (bPos === 1) out.bWins += 1; const bl = bestLapOf(rc.race, b); if (isValidLap(bl)) bBest = Math.min(bBest, bl); const bp = avgPaceOf(rc.race, b); if (bp) bPace.push(bp); out.bTotalOt += overtakesMadeBy(rc.race, b); }
+    if (aPos != null) { aFin.push(aPos); if (aPos === 1) out.aWins += 1; const bl = bestLapOf(rc.race, a); if (isValidLap(bl)) aBest = Math.min(aBest, bl); const ap = avgPaceOf(rc.race, a); if (ap) aPace.push(ap); const ad = paceDeviationOf(rc.race, a); if (ad.cvPct != null) aDev.push(ad.cvPct); out.aTotalOt += overtakesMadeBy(rc.race, a); }
+    if (bPos != null) { bFin.push(bPos); if (bPos === 1) out.bWins += 1; const bl = bestLapOf(rc.race, b); if (isValidLap(bl)) bBest = Math.min(bBest, bl); const bp = avgPaceOf(rc.race, b); if (bp) bPace.push(bp); const bd = paceDeviationOf(rc.race, b); if (bd.cvPct != null) bDev.push(bd.cvPct); out.bTotalOt += overtakesMadeBy(rc.race, b); }
     if (aPos != null && bPos != null) {
       out.together += 1;
       if (aPos < bPos) out.aAhead += 1; else out.bAhead += 1;
@@ -864,6 +974,11 @@ function computeHeadToHead(seasonData, a, b) {
   out.aBestLap = aBest === Infinity ? null : aBest;
   out.bBestLap = bBest === Infinity ? null : bBest;
   out.aAvgPace = avgMs(aPace); out.bAvgPace = avgMs(bPace);
+  // Season-wide consistency: the mean of each race's deviation-as-a-share-of-
+  // own-average, so venues with very different lap lengths weigh equally.
+  const avgPct = (arr) => (arr.length ? Math.round((arr.reduce((x, y) => x + y, 0) / arr.length) * 100) / 100 : null);
+  out.aAvgDevPct = avgPct(aDev); out.bAvgDevPct = avgPct(bDev);
+  out.aDevRaces = aDev.length; out.bDevRaces = bDev.length;
   return out;
 }
 
@@ -1108,6 +1223,55 @@ function isValidLap(ms) {
   return typeof ms === "number" && isFinite(ms) && ms > 0 && ms < 600000;
 }
 
+// Median matching Python's statistics.median (mean of the two middle values on
+// even-length input) so cleanLapPool below reproduces the processor exactly.
+function medianOf(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Mirrors the processor's `_clean_laps`: drop lap 1 (standing/rolling start)
+// and any lap slower than 120% of the median of what remains. Reproducing the
+// rule here means the pool matches the `lapsUsed` the processor published, so
+// avg pace and the deviation stats describe the same set of laps. The extra
+// isValidLap guard is defensive — the shipped dataset has no invalid entries.
+function cleanLapPool(times) {
+  const list = Array.isArray(times) ? times.filter(isValidLap) : [];
+  if (list.length <= 1) return [];
+  const withoutLap1 = list.slice(1);
+  const med = medianOf(withoutLap1);
+  if (med == null) return [];
+  const threshold = med * 1.2;
+  return withoutLap1.filter((t) => t <= threshold);
+}
+
+// How far a driver's laps sit from their own average.
+//   stdevMs  population standard deviation over the clean pool.
+//   cvPct    that deviation as a share of the driver's own average lap.
+// Within one race every driver runs the same track, so stdevMs compares them
+// directly. Across a season it does not — a second of scatter means something
+// very different at an 80s oval than at a 7-minute lap — so cvPct is the one
+// that can be averaged over mixed venues.
+function lapDeviation(pool) {
+  if (!Array.isArray(pool) || pool.length < 2) return { stdevMs: null, cvPct: null };
+  const mean = pool.reduce((sum, t) => sum + t, 0) / pool.length;
+  const variance = pool.reduce((sum, t) => sum + (t - mean) * (t - mean), 0) / pool.length;
+  const stdevMs = Math.sqrt(variance);
+  return { stdevMs, cvPct: mean > 0 ? (stdevMs / mean) * 100 : null };
+}
+
+// Lap-time deviation for one driver in one race.
+function paceDeviationOf(race, driver) {
+  return lapDeviation(cleanLapPool((race.laps || {})[driver]));
+}
+
+// "±0.194s" — the deviation column/bar label.
+function fmtDeviation(ms) {
+  return ms == null ? "—" : `±${(ms / 1000).toFixed(3)}s`;
+}
+
 // Format milliseconds as a lap time: "1:34.001" or "58.204".
 function fmtLap(ms) {
   if (!isValidLap(ms)) return "—";
@@ -1133,6 +1297,8 @@ function lapTimeDomain(values) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     isValidLap, fmtLap, lapTimeDomain, describeDelta,
+    medianOf, cleanLapPool, lapDeviation, paceDeviationOf, fmtDeviation,
+    computeGridToFlagRows,
     raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
     sortedEvents, sortedRaceIds,
     buildBattleSeries, laneTicks,

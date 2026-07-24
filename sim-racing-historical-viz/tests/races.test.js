@@ -13,6 +13,7 @@ const {
   computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
   computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
   computeCrashMatrix,
+  medianOf, cleanLapPool, lapDeviation, fmtDeviation, computeGridToFlagRows,
 } = races;
 
 // ---- lap value helpers ----
@@ -161,8 +162,127 @@ describe("computePaceRows", () => {
     expect(rows[0].driver).toBe("C");
     expect(rows[0].rank).toBe(1);
     expect(rows[0].gapMs).toBe(0);
-    expect(rows[0].spreadMs).toBe(5000); // 95000 - 90000
     expect(rows[1].gapMs).toBe(750);
+    // Lap 1 (95000) is not part of the counted pool, so the one remaining lap
+    // is both best and slowest. This previously read 5000 because the slowest
+    // lap was taken from the raw list while the best came from the clean one.
+    expect(rows[0].spreadMs).toBe(0);
+  });
+});
+
+// Enough laps per driver to exercise the clean-lap pool and the deviation
+// stats. Steady laps within a tenth; Scrappy swings by three seconds. Both
+// have a slow lap 1, and Scrappy also has an off-track lap far over 120% of
+// their median — neither should reach the counted pool.
+const paceRace = {
+  grid: ["Steady", "Scrappy"],
+  result: [
+    { driver: "Steady", position: 1, bestLapMs: 90000 },
+    { driver: "Scrappy", position: 2, bestLapMs: 90000 },
+  ],
+  laps: {
+    Steady: [120000, 90000, 90100, 90200],
+    Scrappy: [120000, 90000, 93000, 96000, 200000],
+  },
+  pace: {},
+};
+
+describe("cleanLapPool", () => {
+  it("drops lap 1 and laps slower than 120% of the median", () => {
+    expect(cleanLapPool(paceRace.laps.Steady)).toEqual([90000, 90100, 90200]);
+    expect(cleanLapPool(paceRace.laps.Scrappy)).toEqual([90000, 93000, 96000]);
+  });
+  it("returns nothing when there is no lap beyond the first", () => {
+    expect(cleanLapPool([95000])).toEqual([]);
+    expect(cleanLapPool([])).toEqual([]);
+    expect(cleanLapPool(undefined)).toEqual([]);
+  });
+  it("ignores invalid lap values", () => {
+    expect(cleanLapPool([120000, 90000, 0, 90100])).toEqual([90000, 90100]);
+  });
+});
+
+describe("medianOf", () => {
+  it("averages the middle pair on even-length input", () => {
+    expect(medianOf([1, 2, 3, 4])).toBe(2.5);
+    expect(medianOf([3, 1, 2])).toBe(2);
+    expect(medianOf([])).toBe(null);
+  });
+});
+
+describe("lapDeviation", () => {
+  it("measures how far laps sit from their own average", () => {
+    const steady = lapDeviation([90000, 90100, 90200]);
+    expect(Math.round(steady.stdevMs)).toBe(82);
+    expect(steady.cvPct).toBeCloseTo(0.0906, 3);
+    const scrappy = lapDeviation([90000, 93000, 96000]);
+    expect(Math.round(scrappy.stdevMs)).toBe(2449);
+  });
+  it("is null when there are fewer than two laps to compare", () => {
+    expect(lapDeviation([90000])).toEqual({ stdevMs: null, cvPct: null });
+    expect(lapDeviation([])).toEqual({ stdevMs: null, cvPct: null });
+  });
+});
+
+describe("computePaceRows deviation", () => {
+  const rows = computePaceRows(paceRace);
+  it("reports deviation from each driver's own average", () => {
+    expect(rows.map((r) => r.driver)).toEqual(["Steady", "Scrappy"]);
+    expect(rows[0].stdevMs).toBe(82);
+    expect(rows[1].stdevMs).toBe(2449);
+  });
+  it("keeps spread on the same counted laps as best and average", () => {
+    expect(rows[0].spreadMs).toBe(200); // excludes the 120000 opening lap
+    expect(rows[1].spreadMs).toBe(6000); // excludes the 200000 off-track lap
+  });
+  it("separates drivers that a raw best-to-slowest spread would not", () => {
+    // The whole point of the column: same best lap, very different consistency.
+    expect(rows[0].bestMs).toBe(rows[1].bestMs);
+    expect(rows[1].stdevMs).toBeGreaterThan(rows[0].stdevMs * 10);
+  });
+});
+
+describe("computeGridToFlagRows", () => {
+  const race = {
+    grid: ["C", "B", "A", "Ghost"],
+    result: [
+      { driver: "A", position: 1 },
+      { driver: "B", position: 2 },
+      { driver: "C", position: 3 },
+      { driver: "D", position: 4 },
+    ],
+    qualVsRace: {
+      A: { qualPosition: 1, finishPosition: 1, delta: 0 },
+      B: { qualPosition: 2, finishPosition: 2, delta: 0 },
+      C: { qualPosition: 3, finishPosition: 3, delta: 0 },
+    },
+  };
+  const rows = computeGridToFlagRows(race);
+
+  it("measures movement from the actual starting slot, biggest gain first", () => {
+    expect(rows.map((r) => r.driver)).toEqual(["A", "B", "C", "D"]);
+    expect(rows[0]).toMatchObject({ startPos: 3, finishPos: 1, moved: 2 });
+    expect(rows[1].moved).toBe(0);
+    expect(rows[2]).toMatchObject({ startPos: 1, finishPos: 3, moved: -2 });
+  });
+
+  it("keeps the qualifying slot alongside so reversed grids stay readable", () => {
+    // A started 3rd but qualified 1st: gained 2 on track, lost nothing to the
+    // field they had already beaten. qualVsRace alone would report delta 0.
+    expect(rows[0].qualPos).toBe(1);
+    expect(rows[0].qualDelta).toBe(0);
+    expect(rows[0].moved).toBe(2);
+  });
+
+  it("sorts drivers with no recorded start last instead of ahead of losses", () => {
+    const d = rows.find((r) => r.driver === "D");
+    expect(d.startPos).toBe(null);
+    expect(d.moved).toBe(null);
+    expect(rows[rows.length - 1].driver).toBe("D");
+  });
+
+  it("omits grid entries that never appear in the result", () => {
+    expect(rows.some((r) => r.driver === "Ghost")).toBe(false);
   });
 });
 
@@ -202,6 +322,50 @@ describe("computeHeadToHead", () => {
     expect(h2h.bTotalOt).toBe(0);
     expect(h2h.aOutqual).toBe(1); // A faster than B in Sonoma qual
     expect(h2h.bOutqual).toBe(0);
+  });
+
+  it("averages lap deviation as a share of pace so venues weigh equally", () => {
+    const season = {
+      season: "S98",
+      events: [
+        {
+          eventId: "e1", venue: "Short", venueOrder: 1,
+          qualifying: {},
+          races: {
+            "1": {
+              result: [{ driver: "A", position: 1 }, { driver: "B", position: 2 }],
+              // Same absolute scatter at both venues, but the second venue's
+              // laps are ~4x longer, so a raw millisecond average would let
+              // the long track dominate. As a share of pace, A stays at 1%.
+              laps: { A: [99000, 49500, 50500], B: [99000, 50000, 50000] },
+              pace: {},
+              overtakes: [],
+            },
+          },
+        },
+        {
+          eventId: "e2", venue: "Long", venueOrder: 2,
+          qualifying: {},
+          races: {
+            "1": {
+              result: [{ driver: "A", position: 1 }, { driver: "B", position: 2 }],
+              laps: { A: [400000, 198000, 202000], B: [400000, 200000, 200000] },
+              pace: {},
+              overtakes: [],
+            },
+          },
+        },
+      ],
+    };
+    const h2h = computeHeadToHead(season, "A", "B");
+    expect(h2h.aAvgDevPct).toBeCloseTo(1, 5); // 1% at both venues
+    expect(h2h.bAvgDevPct).toBe(0); // metronomic
+    expect(h2h.aDevRaces).toBe(2);
+  });
+
+  it("leaves average deviation null when no race has enough laps", () => {
+    const h2h = computeHeadToHead(fixtureSeason, "A", "B");
+    expect(h2h.aAvgDevPct).toBe(null);
   });
 });
 
