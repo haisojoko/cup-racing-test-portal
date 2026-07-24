@@ -14,15 +14,22 @@ const RACE_DATA_BASE = "data/races";
 const RACE_DATA_REMOTE =
   "https://raw.githubusercontent.com/haisojoko/cup-racing-test-portal/refs/heads/main/sim-racing-historical-viz/data/races";
 
+// scope: "event" views render every race in the selected event; "race" views
+// render the one selected race; "season" and qualifying are special-cased.
 const RACE_VIEWS = [
-  { id: "battle", label: "Position Battle", scope: "race" },
+  { id: "battle", label: "Position Battle", scope: "event" },
   { id: "laptimes", label: "Lap Times", scope: "race" },
-  { id: "fastlap", label: "Fastest Laps", scope: "race" },
+  { id: "fastlap", label: "Fastest Laps", scope: "event" },
   { id: "pace", label: "Pace & Consistency", scope: "race" },
-  { id: "overtakes", label: "Overtakes", scope: "race" },
+  { id: "overtakes", label: "Overtakes", scope: "event" },
   { id: "qualifying", label: "Qualifying Gaps", scope: "event" },
   { id: "h2h", label: "Head-to-Head", scope: "season" },
 ];
+
+const RACE_DISCLAIMER =
+  "Reconstructed from race-server logs, so it is incomplete in places: some seasons and races have no telemetry, " +
+  "back-markers with no valid lap are omitted, grid order is inferred for reverse-grid races, contacts have no lap number, " +
+  "and “overtakes” count any on-track position swap (lapped traffic included). Read it as directional, not official.";
 
 // In-flight fetch promises, keyed so a season is never loaded twice.
 const _raceFetches = {};
@@ -86,14 +93,20 @@ function sortedRaceSeasonIds(index) {
 // Flatten a season's events into an ordered list of race descriptors.
 function collectSeasonRaces(seasonData) {
   const out = [];
-  const events = [...(seasonData.events || [])].sort((a, b) => (a.venueOrder || 0) - (b.venueOrder || 0));
-  for (const ev of events) {
-    const raceIds = Object.keys(ev.races || {}).sort((a, b) => Number(a) - Number(b));
-    for (const rid of raceIds) {
+  for (const ev of sortedEvents(seasonData)) {
+    for (const rid of sortedRaceIds(ev)) {
       out.push({ eventId: ev.eventId, venue: ev.venue, venueOrder: ev.venueOrder, date: ev.date, raceId: rid, race: ev.races[rid], event: ev });
     }
   }
   return out;
+}
+
+function sortedEvents(seasonData) {
+  return [...(seasonData.events || [])].sort((a, b) => (a.venueOrder || 0) - (b.venueOrder || 0));
+}
+
+function sortedRaceIds(ev) {
+  return Object.keys(ev.races || {}).sort((a, b) => Number(a) - Number(b));
 }
 
 function findEvent(seasonData, eventId) {
@@ -165,7 +178,6 @@ function renderRacesView() {
       return ensureRaceSeason(state.races.seasonId)
         .then((seasonData) => {
           normalizeRaceSelection(seasonData);
-          // Re-render filters now that event/race defaults are settled.
           renderRaceFilters(index, seasonIds, seasonData);
           renderRaceContent(seasonData);
         })
@@ -181,7 +193,6 @@ function renderRacesView() {
       content.innerHTML = renderEmptyStateMarkup(`Failed to load race data: ${err.message}${hint}`);
     });
 
-  // Immediate feedback while the (possibly remote) fetch is in flight.
   if (!state.races.index) {
     content.innerHTML = `<div class="loading-state"><div class="loading-spinner"></div><p>Loading race data…</p></div>`;
   }
@@ -195,9 +206,10 @@ function renderRaceFilters(index, seasonIds, seasonData) {
     .map((id) => `<option value="${escapeHtml(id)}" ${id === state.races.seasonId ? "selected" : ""}>${escapeHtml(id)}</option>`)
     .join("");
 
+  const view = RACE_VIEWS.find((v) => v.id === state.races.view) || RACE_VIEWS[0];
   let eventSelect = "";
   let raceSelect = "";
-  if (seasonData) {
+  if (seasonData && view.scope !== "season") {
     const races = collectSeasonRaces(seasonData);
     const eventsSeen = [];
     const eventOpts = [];
@@ -208,7 +220,6 @@ function renderRaceFilters(index, seasonIds, seasonData) {
     }
     eventSelect = `<label class="inline-control"><span>Event</span><select class="select" id="race-event-select">${eventOpts.join("")}</select></label>`;
 
-    const view = RACE_VIEWS.find((v) => v.id === state.races.view) || RACE_VIEWS[0];
     if (view.scope === "race") {
       const inEvent = races.filter((r) => r.eventId === state.races.eventId);
       const raceOpts = inEvent
@@ -252,14 +263,20 @@ function renderRaceContent(seasonData) {
   let body = "";
   if (view.scope === "season") {
     body = renderH2HView(seasonData);
-  } else if (view.scope === "event") {
+  } else if (view.id === "qualifying") {
     body = renderQualifyingView(seasonData);
+  } else if (view.scope === "event") {
+    const ev = findEvent(seasonData, state.races.eventId);
+    body = ev ? renderEventScopedView(view.id, ev) : renderEmptyStateMarkup("No event selected.");
   } else {
     const race = currentRace(seasonData);
     body = race ? renderRaceScopedView(view.id, seasonData, race) : renderEmptyStateMarkup("No race selected.");
   }
 
-  content.innerHTML = `<div class="subtab-nav">${subtabs}</div>${body}`;
+  content.innerHTML = `
+    <div class="subtab-nav">${subtabs}</div>
+    <div class="race-disclaimer" role="note"><span class="race-disclaimer__tag">Data caveat</span>${escapeHtml(RACE_DISCLAIMER)}</div>
+    ${body}`;
 
   content.querySelector(".subtab-nav")?.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-race-view]");
@@ -268,15 +285,26 @@ function renderRaceContent(seasonData) {
     renderRacesView();
   });
   bindRaceContentControls(seasonData);
+  hydrateRaceTables(seasonData);
+}
+
+// Multi-race (per-event) views: one section per race in the event.
+function renderEventScopedView(viewId, ev) {
+  const raceIds = sortedRaceIds(ev);
+  if (!raceIds.length) return renderEmptyStateMarkup("No races in this event.");
+  const perRace = {
+    battle: (race, id) => buildBattleSection(race, id),
+    fastlap: (race, id) => buildFastLapSection(race, id),
+    overtakes: (race, id) => buildOvertakesSection(race, id),
+  }[viewId];
+  const sections = raceIds.map((id) => perRace(ev.races[id], id)).join("");
+  return `<div class="race-sections">${sections}</div>`;
 }
 
 function renderRaceScopedView(viewId, seasonData, race) {
   switch (viewId) {
-    case "battle": return renderBattleView(seasonData, race);
     case "laptimes": return renderLapTimesView(seasonData, race);
-    case "fastlap": return renderFastLapView(seasonData, race);
     case "pace": return renderPaceView(seasonData, race);
-    case "overtakes": return renderOvertakesView(seasonData, race);
     default: return renderEmptyStateMarkup("Unknown view.");
   }
 }
@@ -288,21 +316,23 @@ function raceHeaderBadges(race) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Position Battle
+// 1. Position Battle (per event)
 // ---------------------------------------------------------------------------
 
-function renderBattleView(seasonData, race) {
+function buildBattleSection(race, raceId) {
   const battle = buildBattleSeries(race);
-  if (!battle.series.length) return renderEmptyStateMarkup("No lap-by-lap position data for this race.");
+  const chart = battle.series.length
+    ? buildBattleChartHtml(battle)
+    : renderEmptyStateMarkup("No lap-by-lap position data for this race.");
   return `
     <div class="card">
       <div class="card__header">
-        <h3 class="card__title">Position Battle</h3>
+        <h3 class="card__title">Race ${escapeHtml(raceId)} — Position Battle</h3>
         ${raceHeaderBadges(race)}
       </div>
       <div class="card__body">
-        ${buildBattleChartHtml(battle)}
-        <p class="subtle-text mt-1">Lap 0 is the starting grid${race.gridConfidence !== "high" ? " (inferred — treat the opening lap with caution)" : ""}. Lower is better.</p>
+        ${chart}
+        ${battle.series.length ? `<p class="subtle-text mt-1">Lap 0 is the starting grid${race.gridConfidence !== "high" ? " (inferred)" : ""}. Lower is better.</p>` : ""}
       </div>
     </div>`;
 }
@@ -330,7 +360,7 @@ function buildBattleChartHtml(battle) {
   const pad = { top: 20, right: 132, bottom: 44, left: 44 };
   const rowH = 20;
   const n = battle.driverCount;
-  const height = Math.max(320, pad.top + pad.bottom + n * rowH);
+  const height = Math.max(300, pad.top + pad.bottom + n * rowH);
   const iw = width - pad.left - pad.right;
   const ih = height - pad.top - pad.bottom;
   const xDen = Math.max(battle.maxLaps, 1);
@@ -380,7 +410,7 @@ function laneTicks(maxLaps) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Lap Times (+ sectors)
+// 2. Lap Times (+ sectors) — single race
 // ---------------------------------------------------------------------------
 
 function renderLapTimesView(seasonData, race) {
@@ -396,7 +426,7 @@ function renderLapTimesView(seasonData, race) {
   return `
     <div class="card">
       <div class="card__header">
-        <h3 class="card__title">Lap Times</h3>
+        <h3 class="card__title">Lap Times — Race ${escapeHtml(state.races.raceId)}</h3>
         <span class="badge">${order.length} drivers</span>
       </div>
       <div class="card__body">
@@ -410,7 +440,7 @@ function renderLapTimesView(seasonData, race) {
         <label class="inline-control"><span>Driver</span><select class="select" id="race-lap-driver">${driverOpts}</select></label>
       </div>
       <div class="card__body">
-        ${buildSectorTableHtml(race, state.races.lapDriver)}
+        <div id="race-sector-table"></div>
       </div>
     </div>`;
 }
@@ -478,62 +508,62 @@ function buildLapTraceChartHtml(traces) {
     </div>`;
 }
 
-function buildSectorTableHtml(race, driver) {
+function sectorTableModel(race, driver) {
   const laps = (race.laps || {})[driver] || [];
   const sectors = (race.sectors || {})[driver] || [];
-  if (!laps.length) return renderEmptyStateMarkup("No sector data for this driver.");
-
-  // Column-best highlighting: fastest S1/S2/S3 and lap across valid laps.
   const bestS = [Infinity, Infinity, Infinity];
   let bestLap = Infinity;
   laps.forEach((ms, i) => {
     if (isValidLap(ms)) bestLap = Math.min(bestLap, ms);
     (sectors[i] || []).forEach((sms, si) => { if (sms > 0) bestS[si] = Math.min(bestS[si], sms); });
   });
-
   const rows = laps.map((ms, i) => {
     const sec = sectors[i] || [];
-    const markBest = (val, best) => (val === best && val > 0 ? `<strong style="color:var(--accent)">${fmtLap(val)}</strong>` : fmtLap(val));
     return {
       lap: i + 1,
-      s1: markBest(sec[0], bestS[0]),
-      s2: markBest(sec[1], bestS[1]),
-      s3: markBest(sec[2], bestS[2]),
-      total: markBest(ms, bestLap),
+      s1: sec[0] || null, s2: sec[1] || null, s3: sec[2] || null, total: ms,
+      _bestS1: sec[0] === bestS[0], _bestS2: sec[1] === bestS[1], _bestS3: sec[2] === bestS[2], _bestLap: ms === bestLap,
     };
   });
+  return rows;
+}
 
-  const columns = [
+function buildSectorColumns() {
+  const cell = (key, bestKey) => (r) => {
+    const v = r[key];
+    const text = fmtLap(v);
+    return r[bestKey] && isValidLap(v) ? `<strong style="color:var(--accent)">${text}</strong>` : escapeHtml(text);
+  };
+  return [
     { key: "lap", label: "Lap", strong: true, widthRem: 4 },
-    { key: "s1", label: "Sector 1", rawHtml: true },
-    { key: "s2", label: "Sector 2", rawHtml: true },
-    { key: "s3", label: "Sector 3", rawHtml: true },
-    { key: "total", label: "Lap", rawHtml: true },
+    { key: "s1", label: "Sector 1", rawHtml: true, render: cell("s1", "_bestS1") },
+    { key: "s2", label: "Sector 2", rawHtml: true, render: cell("s2", "_bestS2") },
+    { key: "s3", label: "Sector 3", rawHtml: true, render: cell("s3", "_bestS3") },
+    { key: "total", label: "Lap time", rawHtml: true, render: cell("total", "_bestLap") },
   ];
-  return renderDataTable(columns, rows, { compact: true });
 }
 
 // ---------------------------------------------------------------------------
-// 3. Fastest Laps
+// 3. Fastest Laps (per event)
 // ---------------------------------------------------------------------------
 
-function renderFastLapView(seasonData, race) {
+function buildFastLapSection(race, raceId) {
   const rows = computeFastestLaps(race);
-  if (!rows.length) return renderEmptyStateMarkup("No lap data for this race.");
-  const bars = buildGapBarsHtml(rows, {
-    labelFn: (r) => r.driver,
-    valueFn: (r) => r.bestMs,
-    barFn: (r) => r.gapMs,
-    valueText: (r) => fmtLap(r.bestMs),
-    gapText: (r) => (r.gapMs === 0 ? "fastest" : `+${(r.gapMs / 1000).toFixed(3)}`),
-  });
+  const body = rows.length
+    ? buildGapBarsHtml(rows, {
+        labelFn: (r) => r.driver,
+        barFn: (r) => r.gapMs,
+        valueText: (r) => fmtLap(r.bestMs),
+        gapText: (r) => (r.gapMs === 0 ? "fastest" : `+${(r.gapMs / 1000).toFixed(3)}`),
+      })
+    : renderEmptyStateMarkup("No lap data for this race.");
   return `
     <div class="card">
       <div class="card__header">
-        <h3 class="card__title">Fastest Lap Comparison</h3>
+        <h3 class="card__title">Race ${escapeHtml(raceId)} — Fastest Laps</h3>
         <span class="badge">${rows.length} drivers</span>
       </div>
-      <div class="card__body">${bars}</div>
+      <div class="card__body">${body}</div>
     </div>`;
 }
 
@@ -556,33 +586,22 @@ function computeFastestLaps(race) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Pace & Consistency
+// 4. Pace & Consistency — single race
 // ---------------------------------------------------------------------------
 
 function renderPaceView(seasonData, race) {
   const rows = computePaceRows(race);
   if (!rows.length) return renderEmptyStateMarkup("No pace data for this race.");
-
-  const columns = [
-    { key: "rank", label: "#", widthRem: 3 },
-    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
-    { key: "avgText", label: "Avg pace", render: (r) => fmtLap(r.avgMs) },
-    { key: "bestText", label: "Best", render: (r) => fmtLap(r.bestMs) },
-    { key: "worstText", label: "Slowest", render: (r) => fmtLap(r.worstMs) },
-    { key: "spreadText", label: "Best→Slowest", render: (r) => `${(r.spreadMs / 1000).toFixed(3)}s` },
-    { key: "gapText", label: "Gap to best avg", render: (r) => (r.gapMs === 0 ? "—" : `+${(r.gapMs / 1000).toFixed(3)}s`) },
-    { key: "lapsUsed", label: "Laps", widthRem: 4 },
-  ];
   return `
     <div class="card">
       <div class="card__header">
-        <h3 class="card__title">Pace &amp; Consistency</h3>
+        <h3 class="card__title">Pace &amp; Consistency — Race ${escapeHtml(state.races.raceId)}</h3>
         <span class="badge">${rows.length} drivers</span>
       </div>
       <div class="card__body">
         ${buildConsistencyBarsHtml(rows)}
-        <div class="mt-1">${renderDataTable(columns, rows, { compact: true })}</div>
-        <p class="subtle-text mt-1">Ranked by average clean-lap pace. "Best→Slowest" is the spread across a driver's valid laps — smaller is more consistent.</p>
+        <div class="mt-1" id="race-pace-table"></div>
+        <p class="subtle-text mt-1">Ranked by average clean-lap pace. "Best→Slowest" is the spread across a driver's valid laps — smaller is more consistent. Click a column to sort.</p>
       </div>
     </div>`;
 }
@@ -609,6 +628,19 @@ function computePaceRows(race) {
   return rows;
 }
 
+function paceColumns() {
+  return [
+    { key: "rank", label: "#", widthRem: 3 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+    { key: "avgMs", label: "Avg pace", render: (r) => fmtLap(r.avgMs) },
+    { key: "bestMs", label: "Best", render: (r) => fmtLap(r.bestMs) },
+    { key: "worstMs", label: "Slowest", render: (r) => fmtLap(r.worstMs) },
+    { key: "spreadMs", label: "Best→Slowest", render: (r) => `${(r.spreadMs / 1000).toFixed(3)}s` },
+    { key: "gapMs", label: "Gap to best avg", render: (r) => (r.gapMs === 0 ? "—" : `+${(r.gapMs / 1000).toFixed(3)}s`) },
+    { key: "lapsUsed", label: "Laps", widthRem: 4 },
+  ];
+}
+
 function buildConsistencyBarsHtml(rows) {
   const maxSpread = Math.max(...rows.map((r) => r.spreadMs), 1);
   const bars = rows.map((r) => {
@@ -624,33 +656,30 @@ function buildConsistencyBarsHtml(rows) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Overtakes
+// 5. Overtakes (per event)
 // ---------------------------------------------------------------------------
 
-function renderOvertakesView(seasonData, race) {
+function buildOvertakesSection(race, raceId) {
   const rows = computeOvertakeTallies(race);
-  if (!rows.length) return renderEmptyStateMarkup("No overtake data for this race.");
-  const maxVal = Math.max(...rows.map((r) => Math.max(r.made, r.suffered)), 1);
-  const bars = rows.map((r, i) => `
-    <div class="ot-row">
-      <span class="hbar-label" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
-      <span class="ot-bars">
-        <span class="ot-side ot-side--made"><span class="ot-fill" style="width:${(r.made / maxVal) * 100}%"></span><span class="ot-num">${r.made}</span></span>
-        <span class="ot-side ot-side--suffered"><span class="ot-fill" style="width:${(r.suffered / maxVal) * 100}%"></span><span class="ot-num">${r.suffered}</span></span>
-      </span>
-    </div>`).join("");
-
+  const body = rows.length ? (() => {
+    const maxVal = Math.max(...rows.map((r) => Math.max(r.made, r.suffered)), 1);
+    const bars = rows.map((r) => `
+      <div class="ot-row">
+        <span class="hbar-label" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
+        <span class="ot-bars">
+          <span class="ot-side ot-side--made"><span class="ot-fill" style="width:${(r.made / maxVal) * 100}%"></span><span class="ot-num">${r.made}</span></span>
+          <span class="ot-side ot-side--suffered"><span class="ot-fill" style="width:${(r.suffered / maxVal) * 100}%"></span><span class="ot-num">${r.suffered}</span></span>
+        </span>
+      </div>`).join("");
+    return `<div class="ot-legend"><span><span class="ot-key ot-key--made"></span>Passes made</span><span><span class="ot-key ot-key--suffered"></span>Passes suffered</span></div><div class="ot-chart">${bars}</div>`;
+  })() : renderEmptyStateMarkup("No overtake data for this race.");
   return `
     <div class="card">
       <div class="card__header">
-        <h3 class="card__title">Overtakes</h3>
-        <span class="badge">${(race.overtakes || []).length} total passes</span>
+        <h3 class="card__title">Race ${escapeHtml(raceId)} — Overtakes</h3>
+        <span class="badge">${(race.overtakes || []).length} passes</span>
       </div>
-      <div class="card__body">
-        <div class="ot-legend"><span><span class="ot-key ot-key--made"></span>Passes made</span><span><span class="ot-key ot-key--suffered"></span>Passes suffered</span></div>
-        <div class="ot-chart">${bars}</div>
-        <p class="subtle-text mt-1">A "pass" is any on-track position swap, so lapped traffic is included — read these as activity, not clean overtakes.</p>
-      </div>
+      <div class="card__body">${body}</div>
     </div>`;
 }
 
@@ -671,7 +700,7 @@ function computeOvertakeTallies(race) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Qualifying gaps
+// 6. Qualifying gaps (per event)
 // ---------------------------------------------------------------------------
 
 function renderQualifyingView(seasonData) {
@@ -688,7 +717,6 @@ function renderQualifyingView(seasonData) {
 
   const bars = rows.length ? buildGapBarsHtml(rows, {
     labelFn: (r) => r.driver,
-    valueFn: (r) => r.bestMs,
     barFn: (r) => r.gapMs,
     valueText: (r) => fmtLap(r.bestMs),
     gapText: (r) => (r.gapMs === 0 ? "POLE" : `+${(r.gapMs / 1000).toFixed(3)}`),
@@ -740,32 +768,31 @@ function renderH2HView(seasonData) {
   const h2h = computeHeadToHead(seasonData, a, b);
   const colorA = seriesColor(0, 2), colorB = seriesColor(1, 2);
 
-  const summaryCard = (label, va, vb, better) => {
-    const aWin = better === "low" ? va < vb : va > vb;
-    const bWin = better === "low" ? vb < va : vb > va;
+  const metric = (label, va, vb, better) => {
+    const aWin = better === "low" ? cmpLow(va, vb) : better === "high" ? cmpHigh(va, vb) : false;
+    const bWin = better === "low" ? cmpLow(vb, va) : better === "high" ? cmpHigh(vb, va) : false;
     return `
       <div class="h2h-metric">
         <div class="h2h-metric__label">${escapeHtml(label)}</div>
         <div class="h2h-metric__vals">
-          <span class="${aWin ? "is-better" : ""}" style="color:${colorA}">${va}</span>
+          <span class="${aWin ? "is-better" : ""}" style="color:${colorA}">${escapeHtml(String(va))}</span>
           <span class="h2h-metric__vs">vs</span>
-          <span class="${bWin ? "is-better" : ""}" style="color:${colorB}">${vb}</span>
+          <span class="${bWin ? "is-better" : ""}" style="color:${colorB}">${escapeHtml(String(vb))}</span>
         </div>
       </div>`;
   };
 
-  const rows = h2h.races.map((r) => ({
-    round: `${r.venueOrder}. ${r.venue} R${r.raceId}`,
-    a: r.aPos != null ? `P${r.aPos}` : "—",
-    b: r.bPos != null ? `P${r.bPos}` : "—",
-    ahead: r.aPos != null && r.bPos != null ? (r.aPos < r.bPos ? a : b) : "—",
-  }));
-  const columns = [
-    { key: "round", label: "Race", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
-    { key: "a", label: escapeHtml(a) },
-    { key: "b", label: escapeHtml(b) },
-    { key: "ahead", label: "Ahead" },
-  ];
+  const cards = [
+    metric("Races together", h2h.together, h2h.together, "eq"),
+    metric("Finished ahead", h2h.aAhead, h2h.bAhead, "high"),
+    metric("Avg finish", h2h.aAvgFinish ?? "—", h2h.bAvgFinish ?? "—", "low"),
+    metric("Wins", h2h.aWins, h2h.bWins, "high"),
+    metric("Best lap", fmtLap(h2h.aBestLap), fmtLap(h2h.bBestLap), "low"),
+    metric("Avg race pace", fmtLap(h2h.aAvgPace), fmtLap(h2h.bAvgPace), "low"),
+    metric("Total overtakes", h2h.aTotalOt, h2h.bTotalOt, "high"),
+  ].join("");
+
+  const legend = `<div class="h2h-legend"><span class="legend-item"><span class="legend-swatch" style="background:${colorA}"></span>A — ${escapeHtml(a)}</span><span class="legend-item"><span class="legend-swatch" style="background:${colorB}"></span>B — ${escapeHtml(b)}</span></div>`;
 
   return `
     <div class="card">
@@ -774,22 +801,30 @@ function renderH2HView(seasonData) {
         <div class="view-filters">${pickers}</div>
       </div>
       <div class="card__body">
-        <div class="h2h-grid">
-          ${summaryCard("Races together", h2h.together, h2h.together, "eq")}
-          ${summaryCard("Finished ahead", h2h.aAhead, h2h.bAhead, "high")}
-          ${summaryCard("Avg finish", h2h.aAvgFinish ?? "—", h2h.bAvgFinish ?? "—", "low")}
-          ${summaryCard("Wins", h2h.aWins, h2h.bWins, "high")}
-          ${summaryCard("Best lap", fmtLap(h2h.aBestLap), fmtLap(h2h.bBestLap), "low")}
-          ${summaryCard("Avg race pace", fmtLap(h2h.aAvgPace), fmtLap(h2h.bAvgPace), "low")}
-        </div>
-        <div class="mt-1">${rows.length ? renderDataTable(columns, rows, { compact: true }) : renderEmptyStateMarkup("These two never raced together this season.")}</div>
+        ${legend}
+        <div class="h2h-grid mt-1">${cards}</div>
       </div>
+    </div>
+    <div class="card mt-1">
+      <div class="card__header"><h3 class="card__title">Qualifying — session by session</h3></div>
+      <div class="card__body"><div id="h2h-qual-table"></div></div>
+    </div>
+    <div class="card mt-1">
+      <div class="card__header"><h3 class="card__title">Race pace &amp; racecraft — race by race</h3></div>
+      <div class="card__body"><div id="h2h-race-table"></div></div>
     </div>`;
+}
+
+function cmpLow(x, y) { return typeof x === "number" && typeof y === "number" && x < y; }
+function cmpHigh(x, y) { return typeof x === "number" && typeof y === "number" && x > y; }
+
+function overtakesMadeBy(race, driver) {
+  return (race.overtakes || []).reduce((n, ov) => n + (ov.driver === driver ? 1 : 0), 0);
 }
 
 function computeHeadToHead(seasonData, a, b) {
   const races = collectSeasonRaces(seasonData);
-  const out = { races: [], together: 0, aAhead: 0, bAhead: 0, aWins: 0, bWins: 0 };
+  const out = { races: [], together: 0, aAhead: 0, bAhead: 0, aWins: 0, bWins: 0, aTotalOt: 0, bTotalOt: 0 };
   const aFin = [], bFin = [], aPace = [], bPace = [];
   let aBest = Infinity, bBest = Infinity;
   for (const rc of races) {
@@ -800,8 +835,8 @@ function computeHeadToHead(seasonData, a, b) {
     const aPos = posOf(a), bPos = posOf(b);
     if (aPos == null && bPos == null) continue;
     out.races.push({ venue: rc.venue, venueOrder: rc.venueOrder, raceId: rc.raceId, aPos, bPos });
-    if (aPos != null) { aFin.push(aPos); if (aPos === 1) out.aWins += 1; const bl = bestLapOf(rc.race, a); if (isValidLap(bl)) aBest = Math.min(aBest, bl); const ap = avgPaceOf(rc.race, a); if (ap) aPace.push(ap); }
-    if (bPos != null) { bFin.push(bPos); if (bPos === 1) out.bWins += 1; const bl = bestLapOf(rc.race, b); if (isValidLap(bl)) bBest = Math.min(bBest, bl); const bp = avgPaceOf(rc.race, b); if (bp) bPace.push(bp); }
+    if (aPos != null) { aFin.push(aPos); if (aPos === 1) out.aWins += 1; const bl = bestLapOf(rc.race, a); if (isValidLap(bl)) aBest = Math.min(aBest, bl); const ap = avgPaceOf(rc.race, a); if (ap) aPace.push(ap); out.aTotalOt += overtakesMadeBy(rc.race, a); }
+    if (bPos != null) { bFin.push(bPos); if (bPos === 1) out.bWins += 1; const bl = bestLapOf(rc.race, b); if (isValidLap(bl)) bBest = Math.min(bBest, bl); const bp = avgPaceOf(rc.race, b); if (bp) bPace.push(bp); out.bTotalOt += overtakesMadeBy(rc.race, b); }
     if (aPos != null && bPos != null) {
       out.together += 1;
       if (aPos < bPos) out.aAhead += 1; else out.bAhead += 1;
@@ -814,6 +849,51 @@ function computeHeadToHead(seasonData, a, b) {
   out.bBestLap = bBest === Infinity ? null : bBest;
   out.aAvgPace = avgMs(aPace); out.bAvgPace = avgMs(bPace);
   return out;
+}
+
+// Per-quali-session gap between the two drivers, across the whole season.
+function computeH2HQualRows(seasonData, a, b) {
+  const rows = [];
+  for (const ev of sortedEvents(seasonData)) {
+    const quals = ev.qualifying || {};
+    for (const qid of Object.keys(quals).sort()) {
+      const times = quals[qid].times || {};
+      const aMs = times[a] && isValidLap(times[a].bestMs) ? times[a].bestMs : null;
+      const bMs = times[b] && isValidLap(times[b].bestMs) ? times[b].bestMs : null;
+      if (aMs == null && bMs == null) continue;
+      rows.push({
+        session: `${ev.venueOrder}. ${ev.venue} ${qid.toUpperCase()}`,
+        venueOrder: ev.venueOrder,
+        aMs, bMs,
+        deltaMs: aMs != null && bMs != null ? aMs - bMs : null,
+      });
+    }
+  }
+  return rows;
+}
+
+// Per-race fastest-lap gap, pace delta, and overtakes for races both contested.
+function computeH2HRaceRows(seasonData, a, b) {
+  const rows = [];
+  for (const rc of collectSeasonRaces(seasonData)) {
+    const hasA = (rc.race.result || []).some((r) => r.driver === a);
+    const hasB = (rc.race.result || []).some((r) => r.driver === b);
+    if (!hasA || !hasB) continue;
+    const aBest = bestLapOf(rc.race, a), bBest = bestLapOf(rc.race, b);
+    const aPace = avgPaceOf(rc.race, a), bPace = avgPaceOf(rc.race, b);
+    rows.push({
+      race: `${rc.venueOrder}. ${rc.venue} R${rc.raceId}`,
+      venueOrder: rc.venueOrder,
+      raceId: Number(rc.raceId),
+      aBest, bBest,
+      flDeltaMs: isValidLap(aBest) && isValidLap(bBest) ? aBest - bBest : null,
+      aPace, bPace,
+      paceDeltaMs: aPace && bPace ? Math.round(aPace - bPace) : null,
+      aOt: overtakesMadeBy(rc.race, a),
+      bOt: overtakesMadeBy(rc.race, b),
+    });
+  }
+  return rows;
 }
 
 function bestLapOf(race, driver) {
@@ -830,8 +910,16 @@ function avgPaceOf(race, driver) {
   return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
 }
 
+// Signed delta cell: "+0.234 (A)" / "−0.100 (B)" with the leader implied by sign.
+function deltaCell(deltaMs) {
+  if (deltaMs == null) return "—";
+  if (deltaMs === 0) return "even";
+  const who = deltaMs < 0 ? "A" : "B";
+  return `${deltaMs < 0 ? "−" : "+"}${(Math.abs(deltaMs) / 1000).toFixed(3)}s (${who})`;
+}
+
 // ---------------------------------------------------------------------------
-// Shared bar chart + content control binding
+// Shared bar chart + table hydration + control binding
 // ---------------------------------------------------------------------------
 
 // Horizontal "gap to leader" bar list used by fastest-lap and qualifying views.
@@ -839,7 +927,7 @@ function buildGapBarsHtml(rows, opts) {
   const maxGap = Math.max(...rows.map((r) => opts.barFn(r)), 1);
   const bars = rows.map((r, i) => {
     const gap = opts.barFn(r);
-    const pct = 8 + (gap / maxGap) * 88; // leader still shows a stub
+    const pct = 8 + (gap / maxGap) * 88;
     return `
       <div class="hbar-row">
         <span class="hbar-rank">${i + 1}</span>
@@ -849,6 +937,47 @@ function buildGapBarsHtml(rows, opts) {
       </div>`;
   }).join("");
   return `<div class="hbar-chart">${bars}</div>`;
+}
+
+// Fill the sortable tables for the active view after content.innerHTML is set.
+function hydrateRaceTables(seasonData) {
+  const view = state.races.view;
+  if (view === "pace") {
+    const race = currentRace(seasonData);
+    if (race && document.getElementById("race-pace-table")) {
+      renderSortableTable("race-pace-table", paceColumns(), computePaceRows(race), { compact: true });
+    }
+  } else if (view === "laptimes") {
+    const race = currentRace(seasonData);
+    if (race && document.getElementById("race-sector-table")) {
+      renderSortableTable("race-sector-table", buildSectorColumns(), sectorTableModel(race, state.races.lapDriver), { compact: true });
+    }
+  } else if (view === "h2h") {
+    const [a, b] = state.races.h2h;
+    if (document.getElementById("h2h-qual-table")) {
+      const qualRows = computeH2HQualRows(seasonData, a, b);
+      const qualCols = [
+        { key: "session", label: "Session", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
+        { key: "aMs", label: `A · ${a}`, render: (r) => fmtLap(r.aMs) },
+        { key: "bMs", label: `B · ${b}`, render: (r) => fmtLap(r.bMs) },
+        { key: "deltaMs", label: "Gap", render: (r) => deltaCell(r.deltaMs) },
+      ];
+      renderSortableTable("h2h-qual-table", qualCols, qualRows, { compact: true });
+    }
+    if (document.getElementById("h2h-race-table")) {
+      const raceRows = computeH2HRaceRows(seasonData, a, b);
+      const raceCols = [
+        { key: "race", label: "Race", strong: true, sticky: true, stickyWidthRem: 14, className: "wrap-col" },
+        { key: "aBest", label: `FL · ${a}`, render: (r) => fmtLap(r.aBest) },
+        { key: "bBest", label: `FL · ${b}`, render: (r) => fmtLap(r.bBest) },
+        { key: "flDeltaMs", label: "FL gap", render: (r) => deltaCell(r.flDeltaMs) },
+        { key: "paceDeltaMs", label: "Pace Δ", render: (r) => deltaCell(r.paceDeltaMs) },
+        { key: "aOt", label: `OT · ${a}`, widthRem: 5 },
+        { key: "bOt", label: `OT · ${b}`, widthRem: 5 },
+      ];
+      renderSortableTable("h2h-race-table", raceCols, raceRows, { compact: true });
+    }
+  }
 }
 
 function bindRaceContentControls(seasonData) {
@@ -907,10 +1036,11 @@ function lapTimeDomain(values) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    isValidLap, fmtLap, lapTimeDomain,
+    isValidLap, fmtLap, lapTimeDomain, deltaCell,
     raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
+    sortedEvents, sortedRaceIds,
     buildBattleSeries, laneTicks,
     computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
-    computeHeadToHead,
+    computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
   };
 }

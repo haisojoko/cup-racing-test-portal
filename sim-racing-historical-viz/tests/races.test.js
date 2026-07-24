@@ -7,11 +7,11 @@ globalThis.seriesColor = (i) => `color-${i}`;
 
 const races = require("../scripts/views-races.js");
 const {
-  isValidLap, fmtLap, lapTimeDomain,
+  isValidLap, fmtLap, lapTimeDomain, deltaCell,
   raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
   buildBattleSeries, laneTicks,
   computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
-  computeHeadToHead,
+  computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
 } = races;
 
 // ---- lap value helpers ----
@@ -184,7 +184,7 @@ describe("computeQualGaps", () => {
 });
 
 describe("computeHeadToHead", () => {
-  it("tallies shared races, finishes, wins, and pace", () => {
+  it("tallies shared races, finishes, wins, pace, and overtakes", () => {
     const h2h = computeHeadToHead(fixtureSeason, "A", "B");
     expect(h2h.together).toBe(2); // both raced Monza and Sonoma
     expect(h2h.aAhead).toBe(2);
@@ -193,5 +193,47 @@ describe("computeHeadToHead", () => {
     expect(h2h.bWins).toBe(0);
     expect(h2h.aBestLap).toBe(88000);
     expect(h2h.races.length).toBe(2);
+    expect(h2h.aTotalOt).toBe(2); // A made 2 passes in Sonoma R1
+    expect(h2h.bTotalOt).toBe(0);
+  });
+});
+
+describe("overtakesMadeBy", () => {
+  it("counts only passes made by the driver", () => {
+    const race = fixtureSeason.events[0].races["1"];
+    expect(overtakesMadeBy(race, "A")).toBe(2);
+    expect(overtakesMadeBy(race, "B")).toBe(0);
+    expect(overtakesMadeBy(race, "C")).toBe(1);
+  });
+});
+
+describe("computeH2HQualRows", () => {
+  it("returns one row per quali session with a signed delta", () => {
+    const rows = computeH2HQualRows(fixtureSeason, "A", "B");
+    expect(rows.length).toBe(1); // only Sonoma had qualifying
+    expect(rows[0].aMs).toBe(91000);
+    expect(rows[0].bMs).toBe(91500);
+    expect(rows[0].deltaMs).toBe(-500); // A faster
+  });
+});
+
+describe("computeH2HRaceRows", () => {
+  it("returns per-race FL gap, pace delta, and overtakes for shared races", () => {
+    const rows = computeH2HRaceRows(fixtureSeason, "A", "B");
+    expect(rows.length).toBe(2); // both raced Monza + Sonoma
+    const sonoma = rows.find((r) => r.race.includes("Sonoma"));
+    expect(sonoma.flDeltaMs).toBe(-1500); // A best 90500 vs B 92000
+    expect(sonoma.paceDeltaMs).toBe(-1250); // A 93250 vs B 94500
+    expect(sonoma.aOt).toBe(2);
+    expect(sonoma.bOt).toBe(0);
+  });
+});
+
+describe("deltaCell", () => {
+  it("formats signed deltas with the leading driver", () => {
+    expect(deltaCell(null)).toBe("—");
+    expect(deltaCell(0)).toBe("even");
+    expect(deltaCell(-500)).toBe("−0.500s (A)");
+    expect(deltaCell(1250)).toBe("+1.250s (B)");
   });
 });
