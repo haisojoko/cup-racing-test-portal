@@ -14,24 +14,20 @@ const RACE_DATA_BASE = "data/races";
 const RACE_DATA_REMOTE =
   "https://raw.githubusercontent.com/haisojoko/cup-racing-test-portal/refs/heads/main/sim-racing-historical-viz/data/races";
 
-// scope: "event" views render every race in the selected event; "race" views
-// render the one selected race; "season" and qualifying are special-cased.
+// Four tabs, each answering one question about the selected weekend, plus a
+// season-wide tab. Everything except "season" is scoped to the event, so the
+// filter bar keeps the same shape as you move between tabs — the race within
+// the weekend is chosen by an inline switcher, not by a dropdown that appears
+// on some tabs and not others.
 const RACE_VIEWS = [
-  { id: "battle", label: "Position Battle", scope: "event" },
-  { id: "laptimes", label: "Lap Times", scope: "race" },
-  { id: "fastlap", label: "Fastest Laps", scope: "event" },
-  { id: "pace", label: "Pace & Consistency", scope: "race" },
-  { id: "overtakes", label: "Overtakes", scope: "event" },
-  { id: "gridtoflag", label: "Grid → Flag", scope: "event" },
-  { id: "qualifying", label: "Qualifying Gaps", scope: "event" },
-  { id: "h2h", label: "Head-to-Head", scope: "season" },
-  { id: "crashes", label: "Crashes", scope: "season" },
+  { id: "weekend", label: "Weekend", scope: "event" },
+  { id: "pace", label: "Pace", scope: "event" },
+  { id: "racecraft", label: "Racecraft", scope: "event" },
+  { id: "season", label: "Season", scope: "season" },
 ];
 
 const RACE_DISCLAIMER =
-  "Reconstructed from race-server logs, so it is incomplete in places: some seasons and races have no telemetry, " +
-  "back-markers with no valid lap are omitted, grid order is inferred for reverse-grid races, contacts have no lap number, " +
-  "and “overtakes” count any on-track position swap (lapped traffic included). Read it as directional, not official.";
+  "Some data may be missing, as it is reconstructed from server logs.";
 
 // In-flight fetch promises, keyed so a season is never loaded twice.
 const _raceFetches = {};
@@ -210,7 +206,6 @@ function renderRaceFilters(index, seasonIds, seasonData) {
 
   const view = RACE_VIEWS.find((v) => v.id === state.races.view) || RACE_VIEWS[0];
   let eventSelect = "";
-  let raceSelect = "";
   if (seasonData && view.scope !== "season") {
     const races = collectSeasonRaces(seasonData);
     const eventsSeen = [];
@@ -221,20 +216,11 @@ function renderRaceFilters(index, seasonIds, seasonData) {
       eventOpts.push(`<option value="${escapeHtml(r.eventId)}" ${r.eventId === state.races.eventId ? "selected" : ""}>${r.venueOrder}. ${escapeHtml(r.venue)}</option>`);
     }
     eventSelect = `<label class="inline-control"><span>Event</span><select class="select" id="race-event-select">${eventOpts.join("")}</select></label>`;
-
-    if (view.scope === "race") {
-      const inEvent = races.filter((r) => r.eventId === state.races.eventId);
-      const raceOpts = inEvent
-        .map((r) => `<option value="${escapeHtml(r.raceId)}" ${r.raceId === state.races.raceId ? "selected" : ""}>Race ${escapeHtml(r.raceId)}</option>`)
-        .join("");
-      raceSelect = `<label class="inline-control"><span>Race</span><select class="select" id="race-race-select">${raceOpts}</select></label>`;
-    }
   }
 
   filters.innerHTML = `
     <label class="inline-control"><span>Season</span><select class="select" id="race-season-select">${seasonOpts}</select></label>
     ${eventSelect}
-    ${raceSelect}
   `;
 
   filters.querySelector("#race-season-select")?.addEventListener("change", (e) => {
@@ -249,10 +235,6 @@ function renderRaceFilters(index, seasonIds, seasonData) {
     state.races.qualId = null;
     renderRacesView();
   });
-  filters.querySelector("#race-race-select")?.addEventListener("change", (e) => {
-    state.races.raceId = e.target.value;
-    renderRacesView();
-  });
 }
 
 function renderRaceContent(seasonData) {
@@ -264,20 +246,15 @@ function renderRaceContent(seasonData) {
   const view = RACE_VIEWS.find((v) => v.id === state.races.view) || RACE_VIEWS[0];
   let body = "";
   if (view.scope === "season") {
-    body = view.id === "crashes" ? renderCrashesView(seasonData) : renderH2HView(seasonData);
-  } else if (view.id === "qualifying") {
-    body = renderQualifyingView(seasonData);
-  } else if (view.scope === "event") {
-    const ev = findEvent(seasonData, state.races.eventId);
-    body = ev ? renderEventScopedView(view.id, ev) : renderEmptyStateMarkup("No event selected.");
+    body = renderSeasonTabView(seasonData);
   } else {
-    const race = currentRace(seasonData);
-    body = race ? renderRaceScopedView(view.id, seasonData, race) : renderEmptyStateMarkup("No race selected.");
+    const ev = findEvent(seasonData, state.races.eventId);
+    body = ev ? renderEventTabView(view.id, seasonData, ev) : renderEmptyStateMarkup("No event selected.");
   }
 
   content.innerHTML = `
     <div class="subtab-nav">${subtabs}</div>
-    <div class="race-disclaimer" role="note"><span class="race-disclaimer__tag">Data caveat</span>${escapeHtml(RACE_DISCLAIMER)}</div>
+    <p class="race-disclaimer" role="note"><span class="race-disclaimer__tag">Data caveat</span>${escapeHtml(RACE_DISCLAIMER)}</p>
     ${body}`;
 
   content.querySelector(".subtab-nav")?.addEventListener("click", (e) => {
@@ -290,31 +267,204 @@ function renderRaceContent(seasonData) {
   hydrateRaceTables(seasonData);
 }
 
-// Multi-race (per-event) views: one section per race in the event.
-function renderEventScopedView(viewId, ev) {
+// Event-scoped tabs. Each shows the weekend, with per-race detail driven by
+// the inline race switcher rather than a separate dropdown.
+function renderEventTabView(viewId, seasonData, ev) {
   const raceIds = sortedRaceIds(ev);
   if (!raceIds.length) return renderEmptyStateMarkup("No races in this event.");
-  const perRace = {
-    battle: (race, id) => buildBattleSection(race, id),
-    fastlap: (race, id) => buildFastLapSection(race, id),
-    overtakes: (race, id) => buildOvertakesSection(race, id),
-    gridtoflag: (race, id) => buildGridToFlagSection(race, id),
-  }[viewId];
-  const intro = viewId === "overtakes"
-    ? `<p class="race-note">Opening-lap (lap 1) launch passes are counted only when the grid is trusted (high/medium confidence); low-confidence reverse or ambiguous grids show no lap-1 passes because the start order there is inferred from lap 1 itself. A “pass” is any on-track position swap, lapped traffic included.</p>`
-    : viewId === "gridtoflag"
-      ? `<p class="race-note">Places gained or lost between the actual starting slot and the chequered flag. Where the race did not start in qualifying order — reverse grids especially — the qualifying slot is shown alongside so the two are never confused. Drivers with no recorded start or no classified finish are omitted.</p>`
-      : "";
-  const sections = raceIds.map((id) => perRace(ev.races[id], id)).join("");
-  return `<div class="race-sections">${intro}${sections}</div>`;
-}
+  if (!raceIds.includes(state.races.raceId)) state.races.raceId = raceIds[0];
+  const race = ev.races[state.races.raceId];
 
-function renderRaceScopedView(viewId, seasonData, race) {
   switch (viewId) {
-    case "laptimes": return renderLapTimesView(seasonData, race);
-    case "pace": return renderPaceView(seasonData, race);
+    case "weekend": return renderWeekendTabView(ev, race);
+    case "pace": return renderPaceTabView(ev, race);
+    case "racecraft": return renderRacecraftTabView(ev, race);
     default: return renderEmptyStateMarkup("Unknown view.");
   }
+}
+
+// Segmented Race 1 | Race 2 | Race 3 control. Hidden when the weekend only had
+// one race, so it never occupies space it does not earn.
+function buildRaceSwitcher(ev) {
+  const ids = sortedRaceIds(ev);
+  if (ids.length <= 1) return "";
+  const btns = ids
+    .map((id) => `<button class="subtab-button ${id === state.races.raceId ? "is-active" : ""}" type="button" data-race-id="${escapeHtml(id)}">Race ${escapeHtml(id)}</button>`)
+    .join("");
+  return `<div class="subtab-nav subtab-nav--inline" id="race-switcher">${btns}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Tab 1 — Weekend: how the weekend was won. Qualifying, then the result with
+// grid movement folded in, then the lap-by-lap battle.
+// ---------------------------------------------------------------------------
+
+function renderWeekendTabView(ev, race) {
+  if (!race) return renderEmptyStateMarkup("No race selected.");
+  return `
+    ${buildQualifyingCard(ev)}
+    ${buildRaceSwitcher(ev)}
+    ${buildResultCard(race, state.races.raceId)}
+    ${buildBattleSection(race, state.races.raceId)}`;
+}
+
+function buildResultCard(race, raceId) {
+  const rows = computeResultRows(race);
+  const gained = rows.reduce((sum, r) => sum + Math.max(r.moved || 0, 0), 0);
+  const anyReversed = rows.some((r) => r.qualPos != null && r.startPos != null && r.qualPos !== r.startPos);
+  const note = anyReversed
+    ? `<p class="subtle-text mt-1">This race did not start in qualifying order, so "Qual" and "Start" differ. "Moved" counts places taken from the actual starting slot — a driver reversed to the back can gain a lot without beating anyone they had not already beaten in qualifying.</p>`
+    : `<p class="subtle-text mt-1">"Moved" is places gained or lost between the starting slot and the flag. Click a column to sort.</p>`;
+  return `
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">Race ${escapeHtml(raceId)} — Result</h3>
+        <span class="badge">${gained} places gained</span>
+        ${raceHeaderBadges(race)}
+      </div>
+      <div class="card__body">
+        <div id="race-result-table"></div>
+        ${note}
+      </div>
+    </div>`;
+}
+
+// The finishing order, with starting slot, places moved and best lap folded in
+// — the three things that previously each cost their own tab.
+function computeResultRows(race) {
+  const movement = new Map(computeGridToFlagRows(race).map((r) => [r.driver, r]));
+  const laps = race.laps || {};
+  const rows = (race.result || []).map((r) => {
+    const m = movement.get(r.driver) || {};
+    let best = r.bestLapMs;
+    if (!isValidLap(best)) {
+      const valid = (laps[r.driver] || []).filter(isValidLap);
+      best = valid.length ? Math.min(...valid) : null;
+    }
+    return {
+      position: r.position,
+      driver: r.driver,
+      startPos: m.startPos != null ? m.startPos : null,
+      moved: m.moved != null ? m.moved : null,
+      qualPos: m.qualPos != null ? m.qualPos : null,
+      bestMs: isValidLap(best) ? best : null,
+      lapsDone: (laps[r.driver] || []).length,
+    };
+  });
+  rows.sort((a, b) => (a.position == null ? 999 : a.position) - (b.position == null ? 999 : b.position));
+  return rows;
+}
+
+function resultColumns() {
+  const movedCell = (r) => {
+    if (r.moved == null) return "—";
+    if (r.moved === 0) return `<span class="move-flat">0</span>`;
+    const cls = r.moved > 0 ? "move-gain" : "move-loss";
+    return `<span class="${cls}">${r.moved > 0 ? "+" : ""}${r.moved}</span>`;
+  };
+  return [
+    { key: "position", label: "Pos", strong: true, widthRem: 3.5 },
+    { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+    { key: "startPos", label: "Start", widthRem: 4, render: (r) => (r.startPos == null ? "—" : `P${r.startPos}`) },
+    { key: "moved", label: "Moved", widthRem: 4.5, rawHtml: true, render: movedCell },
+    { key: "qualPos", label: "Qual", widthRem: 4, render: (r) => (r.qualPos == null ? "—" : `P${r.qualPos}`) },
+    { key: "bestMs", label: "Best lap", render: (r) => fmtLap(r.bestMs) },
+    { key: "lapsDone", label: "Laps", widthRem: 4 },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Tab 2 — Pace: how quick and how repeatable, plus sector detail on demand.
+// ---------------------------------------------------------------------------
+
+function renderPaceTabView(ev, race) {
+  if (!race) return renderEmptyStateMarkup("No race selected.");
+  const rows = computePaceRows(race);
+  const order = (race.result || []).map((r) => r.driver).filter(Boolean);
+  if (order.length && !order.includes(state.races.lapDriver)) state.races.lapDriver = order[0];
+  const driverOpts = order
+    .map((d) => `<option value="${escapeHtml(d)}" ${d === state.races.lapDriver ? "selected" : ""}>${escapeHtml(d)}</option>`)
+    .join("");
+
+  const paceBody = rows.length
+    ? `<div id="race-pace-table"></div>
+       <p class="subtle-text mt-1">Ranked by average clean-lap pace. Lap 1 and laps slower than 120% of a driver's median are excluded from the average, deviation and spread. "Best lap" is the driver's outright quickest, including those excluded laps. "Deviation" is how far a typical lap sits from that driver's own average — the steadier read on consistency than best-to-slowest, which one scrappy lap can dominate. <strong class="pace-best">Highlighted</strong> values lead their column; the deviation crown needs at least ${MIN_LAPS_FOR_DEVIATION_CROWN} counted laps. Click a column to sort.</p>`
+    : renderEmptyStateMarkup("No pace data for this race.");
+
+  return `
+    ${buildRaceSwitcher(ev)}
+    <div class="card">
+      <div class="card__header">
+        <h3 class="card__title">Race ${escapeHtml(state.races.raceId)} — Pace &amp; Consistency</h3>
+        <span class="badge">${rows.length} drivers</span>
+      </div>
+      <div class="card__body">${paceBody}</div>
+    </div>
+    <div class="card mt-1">
+      <div class="card__header">
+        <h3 class="card__title">Sector Breakdown</h3>
+        <label class="inline-control"><span>Driver</span><select class="select" id="race-lap-driver">${driverOpts}</select></label>
+      </div>
+      <div class="card__body">
+        <div id="race-sector-table"></div>
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Tab 3 — Racecraft: passes made and taken, and the contact log behind them.
+// ---------------------------------------------------------------------------
+
+function renderRacecraftTabView(ev, race) {
+  if (!race) return renderEmptyStateMarkup("No race selected.");
+  const contacts = computeContactRows(race);
+  return `
+    ${buildRaceSwitcher(ev)}
+    ${buildOvertakesSection(race, state.races.raceId)}
+    <div class="card mt-1">
+      <div class="card__header">
+        <h3 class="card__title">Race ${escapeHtml(state.races.raceId)} — Contacts</h3>
+        <span class="badge">${contacts.length} logged</span>
+      </div>
+      <div class="card__body">
+        ${contacts.length
+          ? `<div id="race-contacts-table"></div>
+             <p class="subtle-text mt-1">Every logged car-to-car contact, hardest first. Impact speed is the closing speed the server recorded, so it separates a light nudge from a heavy hit. Both cars are listed without implying fault. The server logs no time or lap for a collision, so contacts cannot be placed within the race.</p>`
+          : renderEmptyStateMarkup("No contacts logged for this race.")}
+      </div>
+    </div>`;
+}
+
+function computeContactRows(race) {
+  const rows = (race.contacts || []).map((c) => ({
+    lap: c.lap != null ? c.lap : null,
+    lapConfidence: c.lapConfidence || "unknown",
+    driver1: c.driver1 || "—",
+    driver2: c.driver2 || "—",
+    impactSpeed: typeof c.impactSpeed === "number" ? c.impactSpeed : null,
+  }));
+  rows.sort((a, b) => (b.impactSpeed || 0) - (a.impactSpeed || 0));
+  return rows;
+}
+
+// No Lap column: AC's collision events carry no timestamp in this dataset, so
+// `lap` is null on every contact and the column could only ever show a dash.
+// computeContactRows still carries the field, so the column is one line to
+// restore if a future re-process ever populates it.
+function contactColumns() {
+  return [
+    { key: "impactSpeed", label: "Impact", widthRem: 6, render: (r) => (r.impactSpeed == null ? "—" : `${r.impactSpeed.toFixed(1)} km/h`) },
+    { key: "driver1", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+    { key: "driver2", label: "Other car", strong: true },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Tab 4 — Season: the two views that span the whole season.
+// ---------------------------------------------------------------------------
+
+function renderSeasonTabView(seasonData) {
+  return `${renderH2HView(seasonData)}<div class="mt-1">${renderCrashesView(seasonData)}</div>`;
 }
 
 function raceHeaderBadges(race) {
@@ -418,103 +568,8 @@ function laneTicks(maxLaps) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Lap Times (+ sectors) — single race
+// Sector detail (used by the Pace tab)
 // ---------------------------------------------------------------------------
-
-function renderLapTimesView(seasonData, race) {
-  const order = (race.result || []).map((r) => r.driver).filter(Boolean);
-  if (!order.length) return renderEmptyStateMarkup("No lap data for this race.");
-  if (!order.includes(state.races.lapDriver)) state.races.lapDriver = order[0];
-
-  const traces = buildLapTraces(race, order);
-  const driverOpts = order
-    .map((d) => `<option value="${escapeHtml(d)}" ${d === state.races.lapDriver ? "selected" : ""}>${escapeHtml(d)}</option>`)
-    .join("");
-
-  return `
-    <div class="card">
-      <div class="card__header">
-        <h3 class="card__title">Lap Times — Race ${escapeHtml(state.races.raceId)}</h3>
-        <span class="badge">${order.length} drivers</span>
-      </div>
-      <div class="card__body">
-        ${buildLapTraceChartHtml(traces)}
-        <p class="subtle-text mt-1">Lap 1 (standing start) and pit/off-track outliers are clipped to the top of the band so the racing pace stays readable.</p>
-      </div>
-    </div>
-    <div class="card mt-1">
-      <div class="card__header">
-        <h3 class="card__title">Sector Breakdown</h3>
-        <label class="inline-control"><span>Driver</span><select class="select" id="race-lap-driver">${driverOpts}</select></label>
-      </div>
-      <div class="card__body">
-        <div id="race-sector-table"></div>
-      </div>
-    </div>`;
-}
-
-function buildLapTraces(race, order) {
-  const laps = race.laps || {};
-  const total = order.length;
-  const all = [];
-  const series = order.map((driver, i) => {
-    const arr = (laps[driver] || []).map((ms, idx) => ({ lap: idx + 1, ms }));
-    for (const p of arr) if (isValidLap(p.ms) && p.lap > 1) all.push(p.ms);
-    return { driver, color: seriesColor(i, total), laps: arr };
-  });
-  let maxLaps = 0;
-  for (const s of series) maxLaps = Math.max(maxLaps, s.laps.length);
-  const domain = lapTimeDomain(all);
-  return { series, maxLaps, domain };
-}
-
-function buildLapTraceChartHtml(traces) {
-  const width = 980;
-  const pad = { top: 20, right: 132, bottom: 44, left: 68 };
-  const height = 420;
-  const iw = width - pad.left - pad.right;
-  const ih = height - pad.top - pad.bottom;
-  const xDen = Math.max(traces.maxLaps - 1, 1);
-  const { lo, hi } = traces.domain;
-  const span = Math.max(hi - lo, 1);
-  const scaleX = (lap) => pad.left + ((lap - 1) / xDen) * iw;
-  const scaleY = (ms) => {
-    const clamped = Math.max(lo, Math.min(hi, ms));
-    return pad.top + ((clamped - lo) / span) * ih;
-  };
-
-  const yTicks = 4;
-  const yGrid = Array.from({ length: yTicks + 1 }, (_, i) => {
-    const ms = lo + (span * i) / yTicks;
-    const y = pad.top + (ih * i) / yTicks;
-    return `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="rgba(0,0,0,0.06)"/><text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#888">${fmtLap(ms)}</text>`;
-  }).join("");
-
-  const xTicks = laneTicks(traces.maxLaps).filter((l) => l >= 1);
-  const xLabels = xTicks.map((lap) => `<text x="${scaleX(lap)}" y="${height - 16}" text-anchor="middle" font-size="11" fill="#888">L${lap}</text>`).join("");
-
-  const endpoints = [];
-  const seriesSvg = traces.series.map((s) => {
-    const pts = s.laps.filter((p) => isValidLap(p.ms)).map((p) => ({ x: scaleX(p.lap), y: scaleY(p.ms), p }));
-    if (!pts.length) return "";
-    const last = pts[pts.length - 1];
-    endpoints.push({ driver: s.driver, color: s.color, x: last.x, y: last.y });
-    return `<polyline fill="none" stroke="${s.color}" stroke-width="1.75" opacity="0.85" points="${pts.map((p) => `${p.x},${p.y}`).join(" ")}"/>` +
-      pts.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="2" fill="${s.color}"><title>${escapeHtml(s.driver)} | Lap ${p.p.lap} | ${fmtLap(p.p.ms)}</title></circle>`).join("");
-  }).join("");
-
-  const labels = buildEndpointLabels(endpoints, width, height, pad);
-
-  return `
-    <div class="chart-container">
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Lap time traces">
-        <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#fafafa"/>
-        ${yGrid}
-        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="rgba(0,0,0,0.1)"/>
-        ${seriesSvg}${labels}${xLabels}
-      </svg>
-    </div>`;
-}
 
 function sectorTableModel(race, driver) {
   const laps = (race.laps || {})[driver] || [];
@@ -552,67 +607,8 @@ function buildSectorColumns() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Fastest Laps (per event)
-// ---------------------------------------------------------------------------
-
-function buildFastLapSection(race, raceId) {
-  const rows = computeFastestLaps(race);
-  const body = rows.length
-    ? buildGapBarsHtml(rows, {
-        labelFn: (r) => r.driver,
-        barFn: (r) => r.gapMs,
-        valueText: (r) => fmtLap(r.bestMs),
-        gapText: (r) => (r.gapMs === 0 ? "fastest" : `+${(r.gapMs / 1000).toFixed(3)}`),
-      })
-    : renderEmptyStateMarkup("No lap data for this race.");
-  return `
-    <div class="card">
-      <div class="card__header">
-        <h3 class="card__title">Race ${escapeHtml(raceId)} — Fastest Laps</h3>
-        <span class="badge">${rows.length} drivers</span>
-      </div>
-      <div class="card__body">${body}</div>
-    </div>`;
-}
-
-function computeFastestLaps(race) {
-  const result = race.result || [];
-  const laps = race.laps || {};
-  const rows = [];
-  for (const r of result) {
-    if (!r.driver) continue;
-    let best = r.bestLapMs;
-    if (!isValidLap(best)) {
-      best = Math.min(...(laps[r.driver] || []).filter(isValidLap));
-    }
-    if (isValidLap(best)) rows.push({ driver: r.driver, bestMs: best });
-  }
-  rows.sort((a, b) => a.bestMs - b.bestMs);
-  const pole = rows.length ? rows[0].bestMs : 0;
-  for (const r of rows) r.gapMs = r.bestMs - pole;
-  return rows;
-}
-
-// ---------------------------------------------------------------------------
 // 4. Pace & Consistency — single race
 // ---------------------------------------------------------------------------
-
-function renderPaceView(seasonData, race) {
-  const rows = computePaceRows(race);
-  if (!rows.length) return renderEmptyStateMarkup("No pace data for this race.");
-  return `
-    <div class="card">
-      <div class="card__header">
-        <h3 class="card__title">Pace &amp; Consistency — Race ${escapeHtml(state.races.raceId)}</h3>
-        <span class="badge">${rows.length} drivers</span>
-      </div>
-      <div class="card__body">
-        ${buildConsistencyBarsHtml(rows)}
-        <div class="mt-1" id="race-pace-table"></div>
-        <p class="subtle-text mt-1">Ranked by average clean-lap pace. Lap 1 and laps slower than 120% of a driver's median are excluded throughout. "Best→Slowest" is the gap between a driver's quickest and slowest counted lap, so one scrappy lap moves it a lot; "Deviation" is how far a typical lap sits from that driver's own average, which is the steadier read on consistency. Click a column to sort.</p>
-      </div>
-    </div>`;
-}
 
 function computePaceRows(race) {
   const pace = race.pace || {};
@@ -622,64 +618,100 @@ function computePaceRows(race) {
   for (const r of result) {
     const d = r.driver;
     if (!d) continue;
+    const raw = (laps[d] || []).filter(isValidLap);
     const pool = cleanLapPool(laps[d]);
     const p = pace[d] || {};
+
+    // Outright quickest lap, counting laps the pace pool excludes. This is the
+    // fastest-lap figure that used to live in its own tab, and it is why a
+    // driver with a single lap still earns a row here even though no average
+    // can be computed for them.
+    const cleanBest = p.bestMs != null ? p.bestMs : (pool.length ? Math.min(...pool) : null);
+    let bestMs = isValidLap(r.bestLapMs) ? r.bestLapMs : (raw.length ? Math.min(...raw) : null);
+    if (bestMs == null) bestMs = cleanBest;
+
     const avg = p.avgMs != null ? p.avgMs : (pool.length ? pool.reduce((a, b) => a + b, 0) / pool.length : null);
-    const best = p.bestMs != null ? p.bestMs : (pool.length ? Math.min(...pool) : null);
-    if (avg == null || best == null) continue;
-    // Slowest is taken from the same cleaned pool as best and avg. Reading it
+    if (bestMs == null && avg == null) continue;
+
+    // Slowest is taken from the same cleaned pool as the average. Reading it
     // off the raw lap list instead paired a clean best with a lap-1 or
     // off-track worst, which made the spread a measure of a driver's single
     // worst lap rather than of their consistency.
-    const worst = pool.length ? Math.max(...pool) : best;
+    const worst = pool.length ? Math.max(...pool) : null;
     const dev = lapDeviation(pool);
     rows.push({
       driver: d,
-      avgMs: Math.round(avg),
-      bestMs: best,
+      bestMs,
+      avgMs: avg == null ? null : Math.round(avg),
       worstMs: worst,
-      spreadMs: worst - best,
+      spreadMs: worst != null && cleanBest != null ? worst - cleanBest : null,
       stdevMs: dev.stdevMs == null ? null : Math.round(dev.stdevMs),
       cvPct: dev.cvPct,
       lapsUsed: p.lapsUsed != null ? p.lapsUsed : pool.length,
     });
   }
-  rows.sort((a, b) => a.avgMs - b.avgMs);
-  const lead = rows.length ? rows[0].avgMs : 0;
-  rows.forEach((r, i) => { r.rank = i + 1; r.gapMs = r.avgMs - lead; });
+  // Ranked on average pace. Drivers with too few laps to average sort last but
+  // keep their row, so no fastest lap disappears from the weekend.
+  rows.sort((a, b) => {
+    if (a.avgMs == null && b.avgMs == null) return (a.bestMs || 0) - (b.bestMs || 0);
+    if (a.avgMs == null) return 1;
+    if (b.avgMs == null) return -1;
+    return a.avgMs - b.avgMs;
+  });
+  const lead = rows.length && rows[0].avgMs != null ? rows[0].avgMs : 0;
+  rows.forEach((r, i) => {
+    r.rank = r.avgMs == null ? null : i + 1;
+    r.gapMs = r.avgMs == null ? null : r.avgMs - lead;
+  });
+  markPaceLeaders(rows);
   return rows;
+}
+
+// A driver whose only two counted laps happened to be close together would
+// otherwise take the consistency crown from someone who held a steady pace all
+// race, so the deviation flag needs a minimum sample. Two laps produce a
+// deviation of exactly half the gap between them, which is not consistency.
+const MIN_LAPS_FOR_DEVIATION_CROWN = 3;
+
+// Flag the best value in each column. Ties are all flagged — with lap times to
+// the millisecond that is rare, but a genuine dead heat should not pick one
+// driver arbitrarily.
+function markPaceLeaders(rows) {
+  const bestOf = (key, eligible) => {
+    const vals = rows.filter((r) => (eligible ? eligible(r) : true)).map((r) => r[key]).filter((v) => v != null);
+    return vals.length ? Math.min(...vals) : null;
+  };
+  const fastestLap = bestOf("bestMs");
+  const bestAvg = bestOf("avgMs");
+  const lowestDev = bestOf("stdevMs", (r) => r.lapsUsed >= MIN_LAPS_FOR_DEVIATION_CROWN);
+
+  for (const r of rows) {
+    r.isFastestLap = fastestLap != null && r.bestMs === fastestLap;
+    r.isBestAvg = bestAvg != null && r.avgMs === bestAvg;
+    r.isLowestDev = lowestDev != null && r.stdevMs === lowestDev && r.lapsUsed >= MIN_LAPS_FOR_DEVIATION_CROWN;
+  }
+  return rows;
+}
+
+// Wraps a pace value, marking it when it leads its column.
+function paceLeaderCell(text, isLeader, title) {
+  return isLeader
+    ? `<span class="pace-best" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`
+    : escapeHtml(text);
 }
 
 function paceColumns() {
   return [
-    { key: "rank", label: "#", widthRem: 3 },
+    { key: "rank", label: "#", widthRem: 3, render: (r) => (r.rank == null ? "—" : String(r.rank)) },
     { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
-    { key: "avgMs", label: "Avg pace", render: (r) => fmtLap(r.avgMs) },
-    { key: "bestMs", label: "Best", render: (r) => fmtLap(r.bestMs) },
+    { key: "bestMs", label: "Best lap", rawHtml: true, render: (r) => paceLeaderCell(fmtLap(r.bestMs), r.isFastestLap, "Fastest lap of the race") },
+    { key: "avgMs", label: "Avg pace", rawHtml: true, render: (r) => paceLeaderCell(fmtLap(r.avgMs), r.isBestAvg, "Best average pace of the race") },
+    { key: "stdevMs", label: "Deviation", rawHtml: true, render: (r) => paceLeaderCell(fmtDeviation(r.stdevMs), r.isLowestDev, "Steadiest laps of the race") },
     { key: "worstMs", label: "Slowest", render: (r) => fmtLap(r.worstMs) },
-    { key: "spreadMs", label: "Best→Slowest", render: (r) => `${(r.spreadMs / 1000).toFixed(3)}s` },
-    { key: "stdevMs", label: "Deviation", render: (r) => fmtDeviation(r.stdevMs) },
-    { key: "gapMs", label: "Gap to best avg", render: (r) => (r.gapMs === 0 ? "—" : `+${(r.gapMs / 1000).toFixed(3)}s`) },
+    { key: "spreadMs", label: "Best→Slowest", render: (r) => (r.spreadMs == null ? "—" : `${(r.spreadMs / 1000).toFixed(3)}s`) },
+    { key: "gapMs", label: "Gap to best avg", render: (r) => (r.gapMs == null || r.gapMs === 0 ? "—" : `+${(r.gapMs / 1000).toFixed(3)}s`) },
     { key: "lapsUsed", label: "Laps", widthRem: 4 },
   ];
-}
-
-function buildConsistencyBarsHtml(rows) {
-  // Ranked by deviation, not by pace, so the steadiest driver leads the chart
-  // even if they were not the quickest.
-  const scored = rows.filter((r) => r.stdevMs != null).sort((a, b) => a.stdevMs - b.stdevMs);
-  if (!scored.length) return "";
-  const maxDev = Math.max(...scored.map((r) => r.stdevMs), 1);
-  const bars = scored.map((r, i) => {
-    const pct = Math.round((r.stdevMs / maxDev) * 100);
-    return `
-      <div class="hbar-row">
-        <span class="hbar-label" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
-        <span class="hbar-track"><span class="hbar-fill" style="width:${pct}%;background:${seriesColor(i, scored.length)}"></span></span>
-        <span class="hbar-value">${escapeHtml(fmtDeviation(r.stdevMs))}</span>
-      </div>`;
-  }).join("");
-  return `<div class="hbar-chart"><div class="subtle-text" style="margin-bottom:0.4rem">Lap-time deviation from each driver's own average — shorter is steadier</div>${bars}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -730,52 +762,6 @@ function computeOvertakeTallies(race) {
 // 5b. Grid → Flag (per event)
 // ---------------------------------------------------------------------------
 
-function buildGridToFlagSection(race, raceId) {
-  const rows = computeGridToFlagRows(race);
-  const moved = rows.filter((r) => r.moved != null);
-  const anyReversed = moved.some((r) => r.qualPos != null && r.qualPos !== r.startPos);
-
-  const body = moved.length ? (() => {
-    const maxVal = Math.max(...moved.map((r) => Math.abs(r.moved)), 1);
-    // Reuses the overtake chart's diverging bar parts: green leftward for
-    // places gained, red rightward for places lost.
-    const bars = moved.map((r) => {
-      const gained = r.moved > 0 ? r.moved : 0;
-      const lost = r.moved < 0 ? -r.moved : 0;
-      const qualNote = r.qualPos != null && r.qualPos !== r.startPos
-        ? `<span class="gtf-qual">qual P${r.qualPos}</span>`
-        : "";
-      return `
-        <div class="gtf-row">
-          <span class="hbar-label" title="${escapeHtml(r.driver)}">${escapeHtml(r.driver)}</span>
-          <span class="ot-bars">
-            <span class="ot-side ot-side--made"><span class="ot-fill" style="width:${(gained / maxVal) * 100}%"></span><span class="ot-num">${gained || ""}</span></span>
-            <span class="ot-side ot-side--suffered"><span class="ot-fill" style="width:${(lost / maxVal) * 100}%"></span><span class="ot-num">${lost || ""}</span></span>
-          </span>
-          <span class="gtf-value">P${r.startPos} &rarr; P${r.finishPos}${qualNote}</span>
-        </div>`;
-    }).join("");
-    const reverseNote = anyReversed
-      ? `<p class="race-note">This race did not start in qualifying order, so "qual P" is shown where the two differ. Bars measure movement from the actual starting slot; a driver who qualified on pole and was reversed to the back can gain a lot of places here without beating anyone they had not already beaten in qualifying.</p>`
-      : "";
-    return `
-      <div class="ot-legend"><span><span class="ot-key ot-key--made"></span>Places gained</span><span><span class="ot-key ot-key--suffered"></span>Places lost</span></div>
-      <div class="ot-chart">${bars}</div>
-      ${reverseNote}`;
-  })() : renderEmptyStateMarkup("No starting-grid data for this race.");
-
-  const net = moved.reduce((sum, r) => sum + Math.max(r.moved, 0), 0);
-  return `
-    <div class="card">
-      <div class="card__header">
-        <h3 class="card__title">Race ${escapeHtml(raceId)} — Grid &rarr; Flag</h3>
-        <span class="badge">${net} places gained</span>
-        ${raceHeaderBadges(race)}
-      </div>
-      <div class="card__body">${body}</div>
-    </div>`;
-}
-
 // Movement from the actual starting slot to the flag, with the qualifying slot
 // carried alongside. `qualVsRace` in the dataset is measured from qualifying
 // order, which on a reverse grid is not where the driver actually started —
@@ -813,11 +799,12 @@ function computeGridToFlagRows(race) {
 // 6. Qualifying gaps (per event)
 // ---------------------------------------------------------------------------
 
-function renderQualifyingView(seasonData) {
-  const ev = findEvent(seasonData, state.races.eventId);
-  if (!ev) return renderEmptyStateMarkup("No event selected.");
+// Event-level card at the top of the Weekend tab. Returns nothing at all when
+// the weekend has no qualifying, rather than an empty-state that would push the
+// race result down the page for no reason.
+function buildQualifyingCard(ev) {
   const qualIds = Object.keys(ev.qualifying || {});
-  if (!qualIds.length) return renderEmptyStateMarkup("No qualifying sessions recorded for this event.");
+  if (!qualIds.length) return "";
   if (!qualIds.includes(state.races.qualId)) state.races.qualId = qualIds[0];
 
   const rows = computeQualGaps(ev.qualifying[state.races.qualId]);
@@ -833,15 +820,15 @@ function renderQualifyingView(seasonData) {
   }) : renderEmptyStateMarkup("No timed laps in this session.");
 
   return `
-    <div class="card">
+    <div class="card mb-1">
       <div class="card__header">
-        <h3 class="card__title">Qualifying Gaps — ${escapeHtml(ev.venue)}</h3>
+        <h3 class="card__title">Qualifying — ${escapeHtml(ev.venue)}</h3>
         <span class="badge">${rows.length} drivers</span>
       </div>
       <div class="card__body">
-        ${qualIds.length > 1 ? `<div class="subtab-nav" id="qual-session-nav">${sessionButtons}</div>` : ""}
+        ${qualIds.length > 1 ? `<div class="subtab-nav subtab-nav--inline" id="qual-session-nav">${sessionButtons}</div>` : ""}
         ${bars}
-        <p class="subtle-text mt-1">Gap to pole on each driver's best qualifying lap.</p>
+        <p class="subtle-text mt-1">Gap to pole on each driver's best qualifying lap. Applies to the whole weekend, not just the race selected below.</p>
       </div>
     </div>`;
 }
@@ -1118,7 +1105,7 @@ function crashColumns(model) {
 // Shared bar chart + table hydration + control binding
 // ---------------------------------------------------------------------------
 
-// Horizontal "gap to leader" bar list used by fastest-lap and qualifying views.
+// Horizontal "gap to leader" bar list used by the qualifying card.
 function buildGapBarsHtml(rows, opts) {
   const maxGap = Math.max(...rows.map((r) => opts.barFn(r)), 1);
   const bars = rows.map((r, i) => {
@@ -1138,17 +1125,23 @@ function buildGapBarsHtml(rows, opts) {
 // Fill the sortable tables for the active view after content.innerHTML is set.
 function hydrateRaceTables(seasonData) {
   const view = state.races.view;
-  if (view === "pace") {
-    const race = currentRace(seasonData);
+  const race = currentRace(seasonData);
+  if (view === "weekend") {
+    if (race && document.getElementById("race-result-table")) {
+      renderSortableTable("race-result-table", resultColumns(), computeResultRows(race), { compact: true });
+    }
+  } else if (view === "pace") {
     if (race && document.getElementById("race-pace-table")) {
       renderSortableTable("race-pace-table", paceColumns(), computePaceRows(race), { compact: true });
     }
-  } else if (view === "laptimes") {
-    const race = currentRace(seasonData);
     if (race && document.getElementById("race-sector-table")) {
       renderSortableTable("race-sector-table", buildSectorColumns(), sectorTableModel(race, state.races.lapDriver), { compact: true });
     }
-  } else if (view === "h2h") {
+  } else if (view === "racecraft") {
+    if (race && document.getElementById("race-contacts-table")) {
+      renderSortableTable("race-contacts-table", contactColumns(), computeContactRows(race), { compact: true });
+    }
+  } else if (view === "season") {
     const [a, b] = state.races.h2h;
     const colorA = seriesColor(0, 2), colorB = seriesColor(1, 2);
     const nameCell = (color) => (v) => `<span style="color:${color};font-weight:600">${escapeHtml(fmtLap(v))}</span>`;
@@ -1182,7 +1175,6 @@ function hydrateRaceTables(seasonData) {
       ];
       renderSortableTable("h2h-race-table", raceCols, raceRows, { compact: true });
     }
-  } else if (view === "crashes") {
     if (document.getElementById("crash-matrix-table")) {
       const model = computeCrashMatrix(seasonData);
       // Rows arrive pre-sorted by total (desc); headers re-sort on click.
@@ -1196,6 +1188,12 @@ function bindRaceContentControls(seasonData) {
   if (!content) return;
   content.querySelector("#race-lap-driver")?.addEventListener("change", (e) => {
     state.races.lapDriver = e.target.value;
+    renderRacesView();
+  });
+  content.querySelector("#race-switcher")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-race-id]");
+    if (!btn) return;
+    state.races.raceId = btn.dataset.raceId;
     renderRacesView();
   });
   content.querySelector("#qual-session-nav")?.addEventListener("click", (e) => {
@@ -1282,27 +1280,15 @@ function fmtLap(ms) {
   return sec.toFixed(3);
 }
 
-// Robust y-domain for a lap-time chart: clip standing-start and off-track
-// outliers so the racing pace fills the band. Uses percentiles of the pool.
-function lapTimeDomain(values) {
-  const clean = values.filter(isValidLap).slice().sort((a, b) => a - b);
-  if (!clean.length) return { lo: 0, hi: 1 };
-  const q = (p) => clean[Math.min(clean.length - 1, Math.max(0, Math.floor(p * (clean.length - 1))))];
-  const lo = q(0.0);
-  const hi = q(0.92);
-  const pad = Math.max((hi - lo) * 0.08, 250);
-  return { lo: Math.max(0, lo - pad), hi: hi + pad };
-}
-
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    isValidLap, fmtLap, lapTimeDomain, describeDelta,
+    isValidLap, fmtLap, describeDelta,
     medianOf, cleanLapPool, lapDeviation, paceDeviationOf, fmtDeviation,
     computeGridToFlagRows,
     raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
     sortedEvents, sortedRaceIds,
-    buildBattleSeries, laneTicks,
-    computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
+    buildBattleSeries, laneTicks, computeResultRows, computeContactRows,
+    computePaceRows, computeOvertakeTallies, computeQualGaps,
     computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
     computeCrashMatrix,
   };

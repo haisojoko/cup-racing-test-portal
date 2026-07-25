@@ -7,10 +7,10 @@ globalThis.seriesColor = (i) => `color-${i}`;
 
 const races = require("../scripts/views-races.js");
 const {
-  isValidLap, fmtLap, lapTimeDomain, describeDelta,
+  isValidLap, fmtLap, describeDelta,
   raceSeasonKey, sortedRaceSeasonIds, collectSeasonRaces, seasonDriverList,
-  buildBattleSeries, laneTicks,
-  computeFastestLaps, computePaceRows, computeOvertakeTallies, computeQualGaps,
+  buildBattleSeries, laneTicks, computeResultRows, computeContactRows,
+  computePaceRows, computeOvertakeTallies, computeQualGaps,
   computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
   computeCrashMatrix,
   medianOf, cleanLapPool, lapDeviation, fmtDeviation, computeGridToFlagRows,
@@ -44,20 +44,6 @@ describe("fmtLap", () => {
     expect(fmtLap(null)).toBe("—");
   });
 });
-
-describe("lapTimeDomain", () => {
-  it("clips high outliers out of the upper bound", () => {
-    const values = [90000, 91000, 92000, 91500, 90500, 447000];
-    const { lo, hi } = lapTimeDomain(values);
-    expect(lo).toBeLessThanOrEqual(90000);
-    expect(hi).toBeLessThan(447000);
-  });
-  it("handles an empty pool", () => {
-    expect(lapTimeDomain([])).toEqual({ lo: 0, hi: 1 });
-  });
-});
-
-// ---- season/selection helpers ----
 
 describe("raceSeasonKey / sortedRaceSeasonIds", () => {
   it("sorts numerically with suffix ordering", () => {
@@ -147,15 +133,6 @@ describe("laneTicks", () => {
   });
 });
 
-describe("computeFastestLaps", () => {
-  it("sorts by best lap and computes gap to fastest", () => {
-    const rows = computeFastestLaps(fixtureSeason.events[0].races["1"]);
-    expect(rows.map((r) => r.driver)).toEqual(["C", "A", "B"]);
-    expect(rows[0].gapMs).toBe(0);
-    expect(rows[1].gapMs).toBe(500);
-  });
-});
-
 describe("computePaceRows", () => {
   it("ranks by average pace and derives spread + gap", () => {
     const rows = computePaceRows(fixtureSeason.events[0].races["1"]);
@@ -239,6 +216,150 @@ describe("computePaceRows deviation", () => {
     // The whole point of the column: same best lap, very different consistency.
     expect(rows[0].bestMs).toBe(rows[1].bestMs);
     expect(rows[1].stdevMs).toBeGreaterThan(rows[0].stdevMs * 10);
+  });
+});
+
+describe("computePaceRows fastest-lap merge", () => {
+  // The Fastest Laps tab used the official result best lap and listed drivers
+  // who set a lap but never enough of them to average. Folding that tab into
+  // the pace table must not drop either behaviour.
+  const race = {
+    result: [
+      { driver: "Full", position: 1, bestLapMs: 89000 },
+      { driver: "OneLap", position: 2, bestLapMs: 87000 },
+    ],
+    laps: { Full: [120000, 90000, 90100, 90200], OneLap: [87000] },
+    pace: {},
+  };
+  const rows = computePaceRows(race);
+
+  it("keeps drivers with too few laps to average", () => {
+    const one = rows.find((r) => r.driver === "OneLap");
+    expect(one).toBeDefined();
+    expect(one.bestMs).toBe(87000);
+    expect(one.avgMs).toBe(null);
+    expect(one.stdevMs).toBe(null);
+  });
+
+  it("reports the outright best lap, not the clean-pool minimum", () => {
+    // 120000 and 87000 are both outside their driver's pace pool, but they are
+    // still the quickest laps those drivers set.
+    expect(rows.find((r) => r.driver === "Full").bestMs).toBe(89000);
+    expect(rows.find((r) => r.driver === "OneLap").bestMs).toBe(87000);
+  });
+
+  it("ranks only drivers with an average, sorting the rest last", () => {
+    expect(rows[0].driver).toBe("Full");
+    expect(rows[0].rank).toBe(1);
+    expect(rows[rows.length - 1].driver).toBe("OneLap");
+    expect(rows[rows.length - 1].rank).toBe(null);
+    expect(rows[rows.length - 1].gapMs).toBe(null);
+  });
+});
+
+describe("computePaceRows leader flags", () => {
+  it("flags the fastest lap, best average and lowest deviation separately", () => {
+    const rows = computePaceRows({
+      result: [
+        { driver: "Quick", position: 1, bestLapMs: 89000 },
+        { driver: "Steady", position: 2, bestLapMs: 90000 },
+      ],
+      // Quick sets the outright best lap and the best average; Steady is the
+      // more consistent of the two, so the crowns must split across drivers.
+      laps: {
+        Quick: [120000, 89000, 90000, 91000],
+        Steady: [120000, 90000, 90050, 90100],
+      },
+      pace: {},
+    });
+    const quick = rows.find((r) => r.driver === "Quick");
+    const steady = rows.find((r) => r.driver === "Steady");
+    expect(quick.isFastestLap).toBe(true);
+    expect(quick.isBestAvg).toBe(true);
+    expect(quick.isLowestDev).toBe(false);
+    expect(steady.isLowestDev).toBe(true);
+    expect(steady.isFastestLap).toBe(false);
+  });
+
+  it("withholds the deviation crown from a driver with too few counted laps", () => {
+    const rows = computePaceRows({
+      result: [
+        { driver: "TwoLap", position: 1, bestLapMs: 90000 },
+        { driver: "FullRun", position: 2, bestLapMs: 90000 },
+      ],
+      // TwoLap's two laps are identical, giving a deviation of zero off a
+      // sample too small to mean anything.
+      laps: {
+        TwoLap: [120000, 90000, 90000],
+        FullRun: [120000, 90000, 90050, 90100, 90150],
+      },
+      pace: {},
+    });
+    const two = rows.find((r) => r.driver === "TwoLap");
+    const full = rows.find((r) => r.driver === "FullRun");
+    expect(two.stdevMs).toBe(0);
+    expect(two.isLowestDev).toBe(false);
+    expect(full.isLowestDev).toBe(true);
+  });
+
+  it("flags every driver tied for a lead", () => {
+    const rows = computePaceRows({
+      result: [
+        { driver: "A", position: 1, bestLapMs: 90000 },
+        { driver: "B", position: 2, bestLapMs: 90000 },
+      ],
+      laps: { A: [120000, 90000, 90500], B: [120000, 90000, 90500] },
+      pace: {},
+    });
+    expect(rows.every((r) => r.isFastestLap)).toBe(true);
+  });
+});
+
+describe("computeResultRows", () => {
+  const race = {
+    grid: ["C", "B", "A"],
+    result: [
+      { driver: "A", position: 1, bestLapMs: 90000 },
+      { driver: "B", position: 2, bestLapMs: 91000 },
+      { driver: "C", position: 3, bestLapMs: 92000 },
+    ],
+    laps: { A: [95000, 90000], B: [96000, 91000], C: [97000, 92000] },
+    qualVsRace: { A: { qualPosition: 1, finishPosition: 1, delta: 0 } },
+  };
+  const rows = computeResultRows(race);
+
+  it("orders by finishing position and folds in start, movement and best lap", () => {
+    expect(rows.map((r) => r.driver)).toEqual(["A", "B", "C"]);
+    expect(rows[0]).toMatchObject({ position: 1, startPos: 3, moved: 2, qualPos: 1, bestMs: 90000, lapsDone: 2 });
+    expect(rows[2]).toMatchObject({ position: 3, startPos: 1, moved: -2 });
+  });
+
+  it("falls back to the quickest recorded lap when no official best exists", () => {
+    const noBest = computeResultRows({
+      grid: ["X"],
+      result: [{ driver: "X", position: 1 }],
+      laps: { X: [95000, 90500] },
+    });
+    expect(noBest[0].bestMs).toBe(90500);
+  });
+});
+
+describe("computeContactRows", () => {
+  it("sorts hardest impact first and tolerates missing fields", () => {
+    const rows = computeContactRows({
+      contacts: [
+        { driver1: "A", driver2: "B", impactSpeed: 12.5, lap: 3 },
+        { driver1: "C", driver2: "D", impactSpeed: 90.2 },
+        { driver1: "E" },
+      ],
+    });
+    expect(rows.map((r) => r.impactSpeed)).toEqual([90.2, 12.5, null]);
+    expect(rows[1].lap).toBe(3);
+    expect(rows[0].lap).toBe(null);
+    expect(rows[2].driver2).toBe("—");
+  });
+  it("returns nothing when a race logged no contacts", () => {
+    expect(computeContactRows({})).toEqual([]);
   });
 });
 

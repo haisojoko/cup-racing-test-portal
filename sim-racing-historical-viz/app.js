@@ -117,7 +117,7 @@ const state = {
     raceId: null,
     qualId: null,
     lapDriver: null,
-    view: "battle",
+    view: "weekend",
     h2h: [],
   },
   selectedDrivers: [],
