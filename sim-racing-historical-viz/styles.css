@@ -1601,7 +1601,7 @@ button, input, select, textarea { font: inherit; }
   border: 1px solid rgba(180, 130, 20, 0.25);
   border-radius: var(--radius-md);
   padding: 0.55rem 0.75rem;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem;
   font-size: 0.78rem;
   line-height: 1.45;
   color: var(--text-secondary);
@@ -1616,10 +1616,26 @@ button, input, select, textarea { font: inherit; }
   color: #b4822d;
 }
 
-.race-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+/* Secondary segmented control (race switcher, qualifying sessions). Sits
+   inside a tab rather than at the top of the view, so it reads lighter. */
+.subtab-nav--inline {
+  margin-bottom: 0.75rem;
+}
+
+/* Places gained/lost in the race result table. */
+.move-gain { color: var(--success); font-weight: 700; }
+.move-loss { color: var(--danger); font-weight: 700; }
+.move-flat { color: var(--text-muted); }
+
+/* Column leader in the pace table: fastest lap, best average, lowest deviation. */
+.pace-best {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .h2h-legend {
