@@ -1,2 +1,7 @@
 # macOS
 .DS_Store
+
+# Installed dependencies — restore with `npm install`.
+# Covers the vitest run cache at node_modules/.vite/, which is rewritten
+# on every test run.
+node_modules/
