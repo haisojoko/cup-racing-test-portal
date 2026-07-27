@@ -417,17 +417,30 @@ function renderStandingsTable(detail) {
     { key: "members", label: "Drivers", className: "wrap-col", widthRem: 18, render: (r) => r.members.join(", ") || "n/a" },
   ];
 
-  area.innerHTML = `
-    <div class="card">
+  // A split-championship season holds two independent title races. Sorting
+  // them into one table ranks drivers against people they were never competing
+  // with — in S14 the Street champion outscored the GT3 champion, which a
+  // single sorted table reads as an outright win. One table per class instead.
+  const groups = splitStandingsByClass(detail);
+
+  const standingsCards = groups.map((group, i) => `
+    <div class="card ${i ? "mt-1" : ""}">
       <div class="card__header">
-        <h3 class="card__title">Standings</h3>
-        <span class="badge">${detail.standings.length} drivers</span>
+        <h3 class="card__title">${escapeHtml(group.title)}</h3>
+        <span class="badge">${group.rows.length} drivers</span>
+        ${group.champion ? `<span class="badge">${escapeHtml(group.champion)} — champion</span>` : ""}
       </div>
       <div class="card__body">
-        ${buildGapChartHtml(detail)}
-        <div id="season-standings-table"></div>
+        ${buildGapChartHtml(detail, group.scopedChart ? group.rows : null)}
+        <div id="season-standings-table-${i}"></div>
       </div>
-    </div>
+    </div>`).join("");
+
+  area.innerHTML = `
+    ${groups.length > 1
+      ? `<p class="subtle-text">${escapeHtml(detail.seasonLabel)} ran two classes with a championship in each, so positions and points below are counted within class.</p>`
+      : ""}
+    ${standingsCards}
     ${detail.teamStandings.length ? `
     <div class="card mt-1">
       <div class="card__header">
@@ -440,16 +453,54 @@ function renderStandingsTable(detail) {
     ` : ""}
   `;
 
-  renderSortableTable("season-standings-table", standingsColumns, [...detail.standings].sort(compareStandingsRows));
+  groups.forEach((group, i) => {
+    renderSortableTable(`season-standings-table-${i}`, standingsColumns, [...group.rows].sort(compareStandingsRows));
+  });
   if (detail.teamStandings.length) {
     renderSortableTable("season-team-standings-table", teamColumns, detail.teamStandings);
   }
 }
 
+// One group per class on a split-championship season, otherwise a single
+// group holding every driver (the original behaviour).
+function splitStandingsByClass(detail) {
+  const classNames = detail.isSplitChampionship
+    ? uniqueList(detail.standings.map((r) => r.className).filter(Boolean))
+    : [];
+  if (classNames.length < 2) {
+    return [{ title: "Standings", rows: detail.standings, champion: "", scopedChart: false }];
+  }
+
+  const championFor = (className) =>
+    (detail.wdcWinners || []).find(
+      (w) => normalizeInlineText(w.label).toLowerCase() === className.toLowerCase(),
+    )?.name || "";
+
+  const groups = classNames.map((className) => ({
+    title: `${className} Standings`,
+    className,
+    rows: detail.standings.filter((r) => r.className === className),
+    champion: championFor(className),
+    scopedChart: true,
+  }));
+
+  // Any driver the archive never assigned a class (a full-season DNS, usually)
+  // would otherwise vanish from the page entirely.
+  const unclassed = detail.standings.filter((r) => !r.className);
+  if (unclassed.length) {
+    groups.push({ title: "Unclassified", className: "", rows: unclassed, champion: "", scopedChart: true });
+  }
+  return groups;
+}
+
 // Compact "gap to leader" chart: turns the top of a long points table into a
 // shape you can read at a glance. Top 12 classified drivers by points.
-function buildGapChartHtml(detail) {
-  const ranked = [...detail.standings].filter((r) => r.driver).sort(compareStandingsRows);
+// `rowsOverride` scopes the chart to one class on a split-championship season,
+// where a whole-field gap chart would measure drivers against a leader from a
+// championship they were not in.
+function buildGapChartHtml(detail, rowsOverride) {
+  const source = rowsOverride || detail.standings;
+  const ranked = [...source].filter((r) => r.driver).sort(compareStandingsRows);
   if (ranked.length < 2) return "";
   const top = ranked.slice(0, 12);
   const leaderPts = top[0].points || 0;
@@ -705,4 +756,10 @@ function formatTableValue(value, format) {
   if (format === "percent") return formatPercent(value);
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(1);
   return value == null || value === "" ? "n/a" : String(value);
+}
+
+// Exported for unit tests; the browser loads this file as a plain script and
+// ignores the block entirely.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { splitStandingsByClass, compareStandingsRows };
 }

@@ -111,6 +111,71 @@ function findEvent(seasonData, eventId) {
   return (seasonData.events || []).find((e) => e.eventId === eventId) || null;
 }
 
+// ---------------------------------------------------------------------------
+// Car classes
+//
+// Multi-class seasons (S14 GT3/Street, S18a/b and S24a Hypercar/GT3) run two
+// classes in one field, so a raw pace or gap table compares cars that were
+// never racing each other — at S14 Sachsenring the two classes are 16 seconds
+// a lap apart. Anything measuring speed is therefore scoped to the driver's
+// own class; anything describing the race as it happened (finishing order,
+// the position battle, contacts) stays whole-field.
+//
+// `classes` is absent on single-class seasons, so classCtx().isMulti is false
+// and every consumer falls back to its original whole-field behaviour.
+// ---------------------------------------------------------------------------
+
+const NO_CLASSES = { isMulti: false, championship: "", order: [], classOf: () => "" };
+
+function classCtx(seasonData) {
+  const meta = seasonData && seasonData.classes;
+  if (!meta || !Array.isArray(meta.order) || meta.order.length < 2) return NO_CLASSES;
+  const byDriver = meta.drivers || {};
+  return {
+    isMulti: true,
+    championship: meta.championship || "combined",
+    order: meta.order,
+    classOf: (driver) => byDriver[driver] || "",
+  };
+}
+
+// Class of a result row. driverKey is the dataset's canonical label; driver is
+// the display name. They match throughout the current dataset, but preferring
+// driverKey keeps this correct if they ever diverge.
+function rowClass(ctx, row) {
+  return ctx.classOf(row.driverKey || row.driver || "");
+}
+
+// Sort key placing classes in declared order (fastest first), unknowns last.
+function classRank(ctx, name) {
+  const i = ctx.order.indexOf(name);
+  return i < 0 ? ctx.order.length : i;
+}
+
+function classBadge(ctx, name) {
+  if (!ctx.isMulti || !name) return "";
+  return `<span class="class-tag class-tag--${escapeHtml(slugifyClass(name))}">${escapeHtml(name)}</span>`;
+}
+
+function slugifyClass(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+// Group rows by class, preserving each group's incoming order. Returns a
+// single unnamed group on a single-class season so callers need no branch.
+function groupByClass(ctx, rows, keyFn) {
+  if (!ctx.isMulti) return [{ className: "", rows }];
+  const buckets = new Map();
+  for (const row of rows) {
+    const name = keyFn(row);
+    if (!buckets.has(name)) buckets.set(name, []);
+    buckets.get(name).push(row);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => classRank(ctx, a[0]) - classRank(ctx, b[0]))
+    .map(([className, groupRows]) => ({ className, rows: groupRows }));
+}
+
 // Every driver who appears in any race result across the season.
 function seasonDriverList(seasonData) {
   const set = new Set();
@@ -276,9 +341,9 @@ function renderEventTabView(viewId, seasonData, ev) {
   const race = ev.races[state.races.raceId];
 
   switch (viewId) {
-    case "weekend": return renderWeekendTabView(ev, race);
-    case "pace": return renderPaceTabView(ev, race);
-    case "racecraft": return renderRacecraftTabView(ev, race);
+    case "weekend": return renderWeekendTabView(ev, race, seasonData);
+    case "pace": return renderPaceTabView(ev, race, seasonData);
+    case "racecraft": return renderRacecraftTabView(ev, race, seasonData);
     default: return renderEmptyStateMarkup("Unknown view.");
   }
 }
@@ -299,22 +364,26 @@ function buildRaceSwitcher(ev) {
 // grid movement folded in, then the lap-by-lap battle.
 // ---------------------------------------------------------------------------
 
-function renderWeekendTabView(ev, race) {
+function renderWeekendTabView(ev, race, seasonData) {
   if (!race) return renderEmptyStateMarkup("No race selected.");
   return `
     ${buildQualifyingCard(ev)}
     ${buildRaceSwitcher(ev)}
-    ${buildResultCard(race, state.races.raceId)}
+    ${buildResultCard(race, state.races.raceId, seasonData)}
     ${buildBattleSection(race, state.races.raceId)}`;
 }
 
-function buildResultCard(race, raceId) {
-  const rows = computeResultRows(race);
+function buildResultCard(race, raceId, seasonData) {
+  const ctx = classCtx(seasonData);
+  const rows = computeResultRows(race, seasonData);
   const gained = rows.reduce((sum, r) => sum + Math.max(r.moved || 0, 0), 0);
   const anyReversed = rows.some((r) => r.qualPos != null && r.startPos != null && r.qualPos !== r.startPos);
+  const classNote = ctx.isMulti
+    ? ` "Pos" is the overall order across the whole field; "Class" is the position within the driver's own class, so each class has its own winner.`
+    : "";
   const note = anyReversed
-    ? `<p class="subtle-text mt-1">This race did not start in qualifying order, so "Qual" and "Start" differ. "Moved" counts places taken from the actual starting slot — a driver reversed to the back can gain a lot without beating anyone they had not already beaten in qualifying.</p>`
-    : `<p class="subtle-text mt-1">"Moved" is places gained or lost between the starting slot and the flag. Click a column to sort.</p>`;
+    ? `<p class="subtle-text mt-1">This race did not start in qualifying order, so "Qual" and "Start" differ. "Moved" counts places taken from the actual starting slot — a driver reversed to the back can gain a lot without beating anyone they had not already beaten in qualifying.${classNote}</p>`
+    : `<p class="subtle-text mt-1">"Moved" is places gained or lost between the starting slot and the flag.${classNote} Click a column to sort.</p>`;
   return `
     <div class="card">
       <div class="card__header">
@@ -331,7 +400,8 @@ function buildResultCard(race, raceId) {
 
 // The finishing order, with starting slot, places moved and best lap folded in
 // — the three things that previously each cost their own tab.
-function computeResultRows(race) {
+function computeResultRows(race, seasonData) {
+  const ctx = classCtx(seasonData);
   const movement = new Map(computeGridToFlagRows(race).map((r) => [r.driver, r]));
   const laps = race.laps || {};
   const rows = (race.result || []).map((r) => {
@@ -343,6 +413,8 @@ function computeResultRows(race) {
     }
     return {
       position: r.position,
+      classPosition: r.classPosition != null ? r.classPosition : null,
+      className: rowClass(ctx, r),
       driver: r.driver,
       startPos: m.startPos != null ? m.startPos : null,
       moved: m.moved != null ? m.moved : null,
@@ -355,16 +427,32 @@ function computeResultRows(race) {
   return rows;
 }
 
-function resultColumns() {
+function resultColumns(ctx = NO_CLASSES) {
   const movedCell = (r) => {
     if (r.moved == null) return "—";
     if (r.moved === 0) return `<span class="move-flat">0</span>`;
     const cls = r.moved > 0 ? "move-gain" : "move-loss";
     return `<span class="${cls}">${r.moved > 0 ? "+" : ""}${r.moved}</span>`;
   };
+  // Class position sits next to overall so the two readings of the same result
+  // are side by side: P10 overall, P1 in Street.
+  const classCols = ctx.isMulti
+    ? [
+        {
+          key: "className", label: "Class", widthRem: 6, rawHtml: true,
+          render: (r) => classBadge(ctx, r.className) || "—",
+          sortValue: (r) => classRank(ctx, r.className),
+        },
+        {
+          key: "classPosition", label: "In class", widthRem: 5,
+          render: (r) => (r.classPosition == null ? "—" : `P${r.classPosition}`),
+        },
+      ]
+    : [];
   return [
     { key: "position", label: "Pos", strong: true, widthRem: 3.5 },
     { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+    ...classCols,
     { key: "startPos", label: "Start", widthRem: 4, render: (r) => (r.startPos == null ? "—" : `P${r.startPos}`) },
     { key: "moved", label: "Moved", widthRem: 4.5, rawHtml: true, render: movedCell },
     { key: "qualPos", label: "Qual", widthRem: 4, render: (r) => (r.qualPos == null ? "—" : `P${r.qualPos}`) },
@@ -377,18 +465,22 @@ function resultColumns() {
 // Tab 2 — Pace: how quick and how repeatable, plus sector detail on demand.
 // ---------------------------------------------------------------------------
 
-function renderPaceTabView(ev, race) {
+function renderPaceTabView(ev, race, seasonData) {
   if (!race) return renderEmptyStateMarkup("No race selected.");
-  const rows = computePaceRows(race);
+  const ctx = classCtx(seasonData);
+  const rows = computePaceRows(race, seasonData);
   const order = (race.result || []).map((r) => r.driver).filter(Boolean);
   if (order.length && !order.includes(state.races.lapDriver)) state.races.lapDriver = order[0];
   const driverOpts = order
     .map((d) => `<option value="${escapeHtml(d)}" ${d === state.races.lapDriver ? "selected" : ""}>${escapeHtml(d)}</option>`)
     .join("");
 
+  const classNote = ctx.isMulti
+    ? ` This was a multi-class race, so rank, gap and every highlight are measured <strong>within each class</strong> — the classes were never racing each other on pace.`
+    : "";
   const paceBody = rows.length
     ? `<div id="race-pace-table"></div>
-       <p class="subtle-text mt-1">Ranked by average clean-lap pace. Lap 1 and laps slower than 120% of a driver's median are excluded from the average, deviation and spread. "Best lap" is the driver's outright quickest, including those excluded laps. "Deviation" is how far a typical lap sits from that driver's own average — the steadier read on consistency than best-to-slowest, which one scrappy lap can dominate. <strong class="pace-best">Highlighted</strong> values lead their column; the deviation crown needs at least ${MIN_LAPS_FOR_DEVIATION_CROWN} counted laps. Click a column to sort.</p>`
+       <p class="subtle-text mt-1">Ranked by average clean-lap pace.${classNote} Lap 1 and laps slower than 120% of a driver's median are excluded from the average, deviation and spread. "Best lap" is the driver's outright quickest, including those excluded laps. "Deviation" is how far a typical lap sits from that driver's own average — the steadier read on consistency than best-to-slowest, which one scrappy lap can dominate. <strong class="pace-best">Highlighted</strong> values lead their column; the deviation crown needs at least ${MIN_LAPS_FOR_DEVIATION_CROWN} counted laps. Click a column to sort.</p>`
     : renderEmptyStateMarkup("No pace data for this race.");
 
   return `
@@ -415,9 +507,11 @@ function renderPaceTabView(ev, race) {
 // Tab 3 — Racecraft: passes made and taken, and the contact log behind them.
 // ---------------------------------------------------------------------------
 
-function renderRacecraftTabView(ev, race) {
+function renderRacecraftTabView(ev, race, seasonData) {
   if (!race) return renderEmptyStateMarkup("No race selected.");
-  const contacts = computeContactRows(race);
+  const ctx = classCtx(seasonData);
+  const contacts = computeContactRows(race, seasonData);
+  const crossClass = contacts.filter((c) => c.isCrossClass).length;
   return `
     ${buildRaceSwitcher(ev)}
     ${buildOvertakesSection(race, state.races.raceId)}
@@ -429,20 +523,34 @@ function renderRacecraftTabView(ev, race) {
       <div class="card__body">
         ${contacts.length
           ? `<div id="race-contacts-table"></div>
-             <p class="subtle-text mt-1">Every logged car-to-car contact, hardest first. Impact speed is the closing speed the server recorded, so it separates a light nudge from a heavy hit. Both cars are listed without implying fault. The server logs no time or lap for a collision, so contacts cannot be placed within the race.</p>`
+             <p class="subtle-text mt-1">Every logged car-to-car contact, hardest first — the whole field, since a class boundary does not stop cars touching.${
+               ctx.isMulti
+                 ? ` <strong>${crossClass}</strong> of these ${contacts.length} were between different classes, which is traffic rather than a fight for position.`
+                 : ""
+             } Impact speed is the closing speed the server recorded, so it separates a light nudge from a heavy hit. Both cars are listed without implying fault. The server logs no time or lap for a collision, so contacts cannot be placed within the race.</p>`
           : renderEmptyStateMarkup("No contacts logged for this race.")}
       </div>
     </div>`;
 }
 
-function computeContactRows(race) {
-  const rows = (race.contacts || []).map((c) => ({
-    lap: c.lap != null ? c.lap : null,
-    lapConfidence: c.lapConfidence || "unknown",
-    driver1: c.driver1 || "—",
-    driver2: c.driver2 || "—",
-    impactSpeed: typeof c.impactSpeed === "number" ? c.impactSpeed : null,
-  }));
+function computeContactRows(race, seasonData) {
+  const ctx = classCtx(seasonData);
+  const rows = (race.contacts || []).map((c) => {
+    const class1 = ctx.classOf(c.driver1 || "");
+    const class2 = ctx.classOf(c.driver2 || "");
+    return {
+      lap: c.lap != null ? c.lap : null,
+      lapConfidence: c.lapConfidence || "unknown",
+      driver1: c.driver1 || "—",
+      driver2: c.driver2 || "—",
+      class1,
+      class2,
+      // Only meaningful when both cars are classed; an unknown car is not
+      // evidence of a class boundary being crossed.
+      isCrossClass: Boolean(class1 && class2 && class1 !== class2),
+      impactSpeed: typeof c.impactSpeed === "number" ? c.impactSpeed : null,
+    };
+  });
   rows.sort((a, b) => (b.impactSpeed || 0) - (a.impactSpeed || 0));
   return rows;
 }
@@ -451,11 +559,25 @@ function computeContactRows(race) {
 // `lap` is null on every contact and the column could only ever show a dash.
 // computeContactRows still carries the field, so the column is one line to
 // restore if a future re-process ever populates it.
-function contactColumns() {
+function contactColumns(ctx = NO_CLASSES) {
+  const withClass = (nameKey, classKey) => (r) =>
+    `${escapeHtml(r[nameKey])}${r[classKey] ? ` ${classBadge(ctx, r[classKey])}` : ""}`;
+  if (!ctx.isMulti) {
+    return [
+      { key: "impactSpeed", label: "Impact", widthRem: 6, render: (r) => (r.impactSpeed == null ? "—" : `${r.impactSpeed.toFixed(1)} km/h`) },
+      { key: "driver1", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+      { key: "driver2", label: "Other car", strong: true },
+    ];
+  }
   return [
     { key: "impactSpeed", label: "Impact", widthRem: 6, render: (r) => (r.impactSpeed == null ? "—" : `${r.impactSpeed.toFixed(1)} km/h`) },
-    { key: "driver1", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
-    { key: "driver2", label: "Other car", strong: true },
+    { key: "driver1", label: "Driver", strong: true, sticky: true, stickyWidthRem: 12, rawHtml: true, render: withClass("driver1", "class1") },
+    { key: "driver2", label: "Other car", strong: true, rawHtml: true, render: withClass("driver2", "class2") },
+    {
+      key: "isCrossClass", label: "Type", widthRem: 7,
+      render: (r) => (r.isCrossClass ? "Cross-class" : "Same class"),
+      sortValue: (r) => (r.isCrossClass ? 1 : 0),
+    },
   ];
 }
 
@@ -610,7 +732,8 @@ function buildSectorColumns() {
 // 4. Pace & Consistency — single race
 // ---------------------------------------------------------------------------
 
-function computePaceRows(race) {
+function computePaceRows(race, seasonData) {
+  const ctx = classCtx(seasonData);
   const pace = race.pace || {};
   const laps = race.laps || {};
   const result = race.result || [];
@@ -641,6 +764,7 @@ function computePaceRows(race) {
     const dev = lapDeviation(pool);
     rows.push({
       driver: d,
+      className: rowClass(ctx, r),
       bestMs,
       avgMs: avg == null ? null : Math.round(avg),
       worstMs: worst,
@@ -652,18 +776,32 @@ function computePaceRows(race) {
   }
   // Ranked on average pace. Drivers with too few laps to average sort last but
   // keep their row, so no fastest lap disappears from the weekend.
-  rows.sort((a, b) => {
+  const byPace = (a, b) => {
     if (a.avgMs == null && b.avgMs == null) return (a.bestMs || 0) - (b.bestMs || 0);
     if (a.avgMs == null) return 1;
     if (b.avgMs == null) return -1;
     return a.avgMs - b.avgMs;
-  });
-  const lead = rows.length && rows[0].avgMs != null ? rows[0].avgMs : 0;
-  rows.forEach((r, i) => {
-    r.rank = r.avgMs == null ? null : i + 1;
-    r.gapMs = r.avgMs == null ? null : r.avgMs - lead;
-  });
-  markPaceLeaders(rows);
+  };
+  rows.sort(byPace);
+
+  // Rank, gap and the column leaders are all computed within class. A GT3 is
+  // not "4 seconds off the pace" of a Hypercar in any meaningful sense — it is
+  // in a different race — so measuring it against the overall leader would be
+  // noise dressed up as a result.
+  for (const group of groupByClass(ctx, rows, (r) => r.className)) {
+    const lead = group.rows.length && group.rows[0].avgMs != null ? group.rows[0].avgMs : 0;
+    group.rows.forEach((r, i) => {
+      r.rank = r.avgMs == null ? null : i + 1;
+      r.gapMs = r.avgMs == null ? null : r.avgMs - lead;
+    });
+    markPaceLeaders(group.rows);
+  }
+
+  // Keep classes contiguous in the table so the two rankings read as two
+  // rankings rather than one interleaved list.
+  if (ctx.isMulti) {
+    rows.sort((a, b) => classRank(ctx, a.className) - classRank(ctx, b.className) || byPace(a, b));
+  }
   return rows;
 }
 
@@ -700,10 +838,18 @@ function paceLeaderCell(text, isLeader, title) {
     : escapeHtml(text);
 }
 
-function paceColumns() {
+function paceColumns(ctx = NO_CLASSES) {
+  const classCol = ctx.isMulti
+    ? [{
+        key: "className", label: "Class", widthRem: 6, rawHtml: true,
+        render: (r) => classBadge(ctx, r.className) || "—",
+        sortValue: (r) => classRank(ctx, r.className),
+      }]
+    : [];
   return [
     { key: "rank", label: "#", widthRem: 3, render: (r) => (r.rank == null ? "—" : String(r.rank)) },
     { key: "driver", label: "Driver", strong: true, sticky: true, stickyWidthRem: 9 },
+    ...classCol,
     { key: "bestMs", label: "Best lap", rawHtml: true, render: (r) => paceLeaderCell(fmtLap(r.bestMs), r.isFastestLap, "Fastest lap of the race") },
     { key: "avgMs", label: "Avg pace", rawHtml: true, render: (r) => paceLeaderCell(fmtLap(r.avgMs), r.isBestAvg, "Best average pace of the race") },
     { key: "stdevMs", label: "Deviation", rawHtml: true, render: (r) => paceLeaderCell(fmtDeviation(r.stdevMs), r.isLowestDev, "Steadiest laps of the race") },
@@ -865,6 +1011,17 @@ function renderH2HView(seasonData) {
 
   const h2h = computeHeadToHead(seasonData, a, b);
   const colorA = seriesColor(0, 2), colorB = seriesColor(1, 2);
+  const ctx = classCtx(seasonData);
+  const classA = ctx.classOf(a), classB = ctx.classOf(b);
+  // Comparing across classes is allowed — you may well want to know how the
+  // GT3 champion stacked up against the Hypercar runner — but lap times then
+  // measure the car, so say so rather than let the numbers imply otherwise.
+  const crossClassWarning = ctx.isMulti && classA && classB && classA !== classB
+    ? `<p class="race-class-warning" role="note"><strong>Different classes.</strong>
+       ${escapeHtml(a)} raced ${escapeHtml(classA)} and ${escapeHtml(b)} raced ${escapeHtml(classB)}.
+       Finishing positions and overtakes still compare fairly, but best lap, average pace and
+       anything derived from lap time mostly reflect the cars, not the drivers.</p>`
+    : "";
 
   // Each card names both drivers and highlights the leader, so a value is never
   // an unlabelled "A"/"B".
@@ -907,7 +1064,8 @@ function renderH2HView(seasonData) {
         <div class="view-filters">${pickers}</div>
       </div>
       <div class="card__body">
-        <p class="subtle-text">Comparing <strong style="color:${colorA}">${escapeHtml(a)}</strong> vs <strong style="color:${colorB}">${escapeHtml(b)}</strong> across ${escapeHtml(seasonData.season || state.races.seasonId)}. Each card highlights the leader. "Avg lap deviation" is how far a typical lap sits from the driver's own average for that race, as a percentage of it, averaged over every race they finished — lower is steadier, and the percentage keeps short and long circuits comparable.</p>
+        <p class="subtle-text">Comparing <strong style="color:${colorA}">${escapeHtml(a)}</strong>${classA ? ` ${classBadge(ctx, classA)}` : ""} vs <strong style="color:${colorB}">${escapeHtml(b)}</strong>${classB ? ` ${classBadge(ctx, classB)}` : ""} across ${escapeHtml(seasonData.season || state.races.seasonId)}. Each card highlights the leader. "Avg lap deviation" is how far a typical lap sits from the driver's own average for that race, as a percentage of it, averaged over every race they finished — lower is steadier, and the percentage keeps short and long circuits comparable.</p>
+        ${crossClassWarning}
         <div class="h2h-grid mt-1">${cards}</div>
       </div>
     </div>
@@ -1126,20 +1284,21 @@ function buildGapBarsHtml(rows, opts) {
 function hydrateRaceTables(seasonData) {
   const view = state.races.view;
   const race = currentRace(seasonData);
+  const ctx = classCtx(seasonData);
   if (view === "weekend") {
     if (race && document.getElementById("race-result-table")) {
-      renderSortableTable("race-result-table", resultColumns(), computeResultRows(race), { compact: true });
+      renderSortableTable("race-result-table", resultColumns(ctx), computeResultRows(race, seasonData), { compact: true });
     }
   } else if (view === "pace") {
     if (race && document.getElementById("race-pace-table")) {
-      renderSortableTable("race-pace-table", paceColumns(), computePaceRows(race), { compact: true });
+      renderSortableTable("race-pace-table", paceColumns(ctx), computePaceRows(race, seasonData), { compact: true });
     }
     if (race && document.getElementById("race-sector-table")) {
       renderSortableTable("race-sector-table", buildSectorColumns(), sectorTableModel(race, state.races.lapDriver), { compact: true });
     }
   } else if (view === "racecraft") {
     if (race && document.getElementById("race-contacts-table")) {
-      renderSortableTable("race-contacts-table", contactColumns(), computeContactRows(race), { compact: true });
+      renderSortableTable("race-contacts-table", contactColumns(ctx), computeContactRows(race, seasonData), { compact: true });
     }
   } else if (view === "season") {
     const [a, b] = state.races.h2h;
@@ -1291,5 +1450,7 @@ if (typeof module !== "undefined" && module.exports) {
     computePaceRows, computeOvertakeTallies, computeQualGaps,
     computeHeadToHead, computeH2HQualRows, computeH2HRaceRows, overtakesMadeBy,
     computeCrashMatrix,
+    classCtx, rowClass, classRank, groupByClass, slugifyClass,
+    resultColumns, paceColumns, contactColumns,
   };
 }

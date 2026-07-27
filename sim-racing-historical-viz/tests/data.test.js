@@ -681,3 +681,64 @@ describe("getTrackLeaderboard", () => {
     expect(rows.every((r) => r.track === "Spa")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Penalty placements (S21 Monza R4: James recorded at P99)
+// ---------------------------------------------------------------------------
+
+describe("isPenaltyPlacement", () => {
+  const { isPenaltyPlacement, PENALTY_POSITION_MIN } = data;
+
+  it("flags a position far outside any real field", () => {
+    expect(isPenaltyPlacement(99)).toBe(true);
+  });
+
+  it("never flags a plausible finishing position", () => {
+    // The largest field the league has ever run is 19.
+    expect(isPenaltyPlacement(1)).toBe(false);
+    expect(isPenaltyPlacement(19)).toBe(false);
+    expect(isPenaltyPlacement(PENALTY_POSITION_MIN - 1)).toBe(false);
+  });
+
+  it("ignores non-numeric input", () => {
+    expect(isPenaltyPlacement(null)).toBe(false);
+    expect(isPenaltyPlacement("99")).toBe(false);
+  });
+});
+
+describe("buildTrackAggregates — penalty placements", () => {
+  const { buildTrackAggregates } = data;
+
+  const dataset = {
+    seasonDetails: [{
+      seasonId: "S21",
+      venues: [{
+        venueName: "Monza",
+        rows: [{
+          driver: "James",
+          races: [
+            { position: "1", points: 30 },
+            { position: "2", points: 25 },
+            { position: "3", points: 22 },
+            { position: "99", points: 1 },  // stewards' penalty placement
+          ],
+        }],
+      }],
+    }],
+  };
+
+  it("keeps the penalty race as a start but out of the average", () => {
+    const entry = buildTrackAggregates(dataset).find((e) => e.driver === "James");
+    expect(entry.starts).toBe(4);
+    expect(entry.avgFinish).toBe(2);           // (1+2+3)/3, not (1+2+3+99)/4
+    expect(entry.penaltyPlacements).toBe(1);
+    expect(entry.finishSamples).toBe(3);
+  });
+
+  it("still counts its points and its win/podium tallies correctly", () => {
+    const entry = buildTrackAggregates(dataset).find((e) => e.driver === "James");
+    expect(entry.totalPoints).toBe(78);        // the 1 point survives
+    expect(entry.wins).toBe(1);
+    expect(entry.podiums).toBe(3);
+  });
+});

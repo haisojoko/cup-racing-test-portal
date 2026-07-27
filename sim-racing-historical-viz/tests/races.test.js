@@ -546,3 +546,213 @@ describe("computeCrashMatrix", () => {
     expect(model.max).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Multi-class seasons
+// ---------------------------------------------------------------------------
+
+const { classCtx, rowClass, classRank, groupByClass, slugifyClass,
+        resultColumns, paceColumns, contactColumns } = races;
+
+// Shaped like S14 Sachsenring: two GT3s sweep the front, two street cars trail
+// by a huge margin. Overall positions run 1-4; class positions run 1-2 twice.
+const multiClassSeason = {
+  season: "S14",
+  classes: {
+    championship: "split",
+    order: ["GT3", "Street"],
+    drivers: { Josie: "GT3", Lee: "GT3", Toby: "Street", Joyce: "Street" },
+  },
+  events: [{
+    eventId: "e1", venue: "Sachsenring", venueOrder: 1, date: "2025-04-22",
+    qualifying: {},
+    races: {
+      1: {
+        grid: ["Josie", "Lee", "Toby", "Joyce"],
+        result: [
+          { driver: "Josie", driverKey: "Josie", position: 1, classPosition: 1, bestLapMs: 79000 },
+          { driver: "Lee", driverKey: "Lee", position: 2, classPosition: 2, bestLapMs: 79500 },
+          { driver: "Toby", driverKey: "Toby", position: 3, classPosition: 1, bestLapMs: 98000 },
+          { driver: "Joyce", driverKey: "Joyce", position: 4, classPosition: 2, bestLapMs: 101000 },
+        ],
+        laps: {
+          Josie: [130000, 79000, 79100, 79200],
+          Lee: [130000, 79500, 79800, 80100],
+          Toby: [150000, 98000, 98100, 98200],
+          Joyce: [150000, 101000, 103000, 105000],
+        },
+        pace: {},
+        contacts: [
+          { driver1: "Josie", driver2: "Lee", impactSpeed: 40 },
+          { driver1: "Toby", driver2: "Josie", impactSpeed: 90 },
+        ],
+      },
+    },
+  }],
+};
+
+const singleClassSeason = { season: "S20", events: [] };
+
+describe("classCtx", () => {
+  it("reports single-class when the season declares no classes", () => {
+    const ctx = classCtx(singleClassSeason);
+    expect(ctx.isMulti).toBe(false);
+    expect(ctx.classOf("Josie")).toBe("");
+  });
+
+  it("reads championship mode, order and driver classes", () => {
+    const ctx = classCtx(multiClassSeason);
+    expect(ctx.isMulti).toBe(true);
+    expect(ctx.championship).toBe("split");
+    expect(ctx.order).toEqual(["GT3", "Street"]);
+    expect(ctx.classOf("Toby")).toBe("Street");
+  });
+
+  it("treats a one-class declaration as single-class", () => {
+    expect(classCtx({ classes: { order: ["GT3"], drivers: {} } }).isMulti).toBe(false);
+  });
+
+  it("survives a missing or malformed season object", () => {
+    expect(classCtx(undefined).isMulti).toBe(false);
+    expect(classCtx({ classes: {} }).isMulti).toBe(false);
+  });
+});
+
+describe("rowClass / classRank / slugifyClass", () => {
+  it("prefers driverKey over the display name", () => {
+    const ctx = classCtx(multiClassSeason);
+    expect(rowClass(ctx, { driverKey: "Toby", driver: "Someone Else" })).toBe("Street");
+    expect(rowClass(ctx, { driver: "Lee" })).toBe("GT3");
+  });
+
+  it("ranks declared classes in order and sorts unknowns last", () => {
+    const ctx = classCtx(multiClassSeason);
+    expect(classRank(ctx, "GT3")).toBe(0);
+    expect(classRank(ctx, "Street")).toBe(1);
+    expect(classRank(ctx, "Mystery")).toBe(2);
+  });
+
+  it("slugifies class names for CSS", () => {
+    expect(slugifyClass("GT3")).toBe("gt3");
+    expect(slugifyClass("Street Cars")).toBe("street-cars");
+  });
+});
+
+describe("groupByClass", () => {
+  it("returns one unnamed group on a single-class season", () => {
+    const groups = groupByClass(classCtx(singleClassSeason), [{ x: 1 }, { x: 2 }], () => "GT3");
+    expect(groups).toHaveLength(1);
+    expect(groups[0].className).toBe("");
+    expect(groups[0].rows).toHaveLength(2);
+  });
+
+  it("groups in declared class order, preserving row order inside a group", () => {
+    const ctx = classCtx(multiClassSeason);
+    const rows = [
+      { d: "Toby", c: "Street" }, { d: "Josie", c: "GT3" },
+      { d: "Joyce", c: "Street" }, { d: "Lee", c: "GT3" },
+    ];
+    const groups = groupByClass(ctx, rows, (r) => r.c);
+    expect(groups.map((g) => g.className)).toEqual(["GT3", "Street"]);
+    expect(groups[0].rows.map((r) => r.d)).toEqual(["Josie", "Lee"]);
+    expect(groups[1].rows.map((r) => r.d)).toEqual(["Toby", "Joyce"]);
+  });
+});
+
+describe("computePaceRows — multi-class scoping", () => {
+  const race = multiClassSeason.events[0].races["1"];
+
+  it("ranks and gaps within class, not against the overall leader", () => {
+    const rows = computePaceRows(race, multiClassSeason);
+    const by = Object.fromEntries(rows.map((r) => [r.driver, r]));
+    // Both class leaders are rank 1 with a zero gap, despite Toby being ~19s
+    // a lap slower than Josie. Scoring him against Josie would be meaningless.
+    expect(by.Josie.rank).toBe(1);
+    expect(by.Josie.gapMs).toBe(0);
+    expect(by.Toby.rank).toBe(1);
+    expect(by.Toby.gapMs).toBe(0);
+    expect(by.Lee.rank).toBe(2);
+    expect(by.Joyce.rank).toBe(2);
+    expect(by.Joyce.gapMs).toBeGreaterThan(0);
+  });
+
+  it("awards column leaders per class", () => {
+    const rows = computePaceRows(race, multiClassSeason);
+    const by = Object.fromEntries(rows.map((r) => [r.driver, r]));
+    expect(by.Josie.isFastestLap).toBe(true);
+    expect(by.Toby.isFastestLap).toBe(true); // fastest Street car, not fastest overall
+    expect(by.Lee.isFastestLap).toBe(false);
+    expect(by.Joyce.isFastestLap).toBe(false);
+  });
+
+  it("keeps classes contiguous in declared order", () => {
+    const rows = computePaceRows(race, multiClassSeason);
+    expect(rows.map((r) => r.className)).toEqual(["GT3", "GT3", "Street", "Street"]);
+  });
+
+  it("falls back to whole-field ranking without a season argument", () => {
+    const rows = computePaceRows(race);
+    expect(rows.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+    expect(rows.filter((r) => r.isFastestLap)).toHaveLength(1);
+  });
+});
+
+describe("computeResultRows — class position", () => {
+  it("carries overall position, class position and class name", () => {
+    const rows = computeResultRows(multiClassSeason.events[0].races["1"], multiClassSeason);
+    const toby = rows.find((r) => r.driver === "Toby");
+    expect(toby.position).toBe(3);        // overall
+    expect(toby.classPosition).toBe(1);   // first Street car
+    expect(toby.className).toBe("Street");
+  });
+
+  it("leaves class fields empty on a single-class season", () => {
+    const rows = computeResultRows(multiClassSeason.events[0].races["1"], singleClassSeason);
+    expect(rows[0].className).toBe("");
+  });
+});
+
+describe("computeContactRows — cross-class flag", () => {
+  const race = multiClassSeason.events[0].races["1"];
+
+  it("flags contacts between different classes", () => {
+    const rows = computeContactRows(race, multiClassSeason);
+    const gt3Only = rows.find((r) => r.driver1 === "Josie" && r.driver2 === "Lee");
+    const mixed = rows.find((r) => r.driver1 === "Toby");
+    expect(gt3Only.isCrossClass).toBe(false);
+    expect(mixed.isCrossClass).toBe(true);
+    expect(mixed.class1).toBe("Street");
+    expect(mixed.class2).toBe("GT3");
+  });
+
+  it("never flags cross-class when a class is unknown", () => {
+    const rows = computeContactRows(race, singleClassSeason);
+    expect(rows.every((r) => r.isCrossClass === false)).toBe(true);
+  });
+
+  it("still sorts hardest first", () => {
+    const rows = computeContactRows(race, multiClassSeason);
+    expect(rows[0].impactSpeed).toBe(90);
+  });
+});
+
+describe("class-aware columns", () => {
+  it("adds class columns only on a multi-class season", () => {
+    const multi = classCtx(multiClassSeason);
+    const single = classCtx(singleClassSeason);
+    expect(resultColumns(single).map((c) => c.key)).not.toContain("className");
+    expect(resultColumns(multi).map((c) => c.key)).toContain("classPosition");
+    expect(paceColumns(single).map((c) => c.key)).not.toContain("className");
+    expect(paceColumns(multi).map((c) => c.key)).toContain("className");
+    expect(contactColumns(single).map((c) => c.key)).not.toContain("isCrossClass");
+    expect(contactColumns(multi).map((c) => c.key)).toContain("isCrossClass");
+  });
+
+  it("sorts the class column by declared order rather than alphabetically", () => {
+    const ctx = classCtx(multiClassSeason);
+    const col = paceColumns(ctx).find((c) => c.key === "className");
+    // Alphabetically "GT3" < "Street" here, so use a case where they differ.
+    expect(col.sortValue({ className: "GT3" })).toBe(0);
+    expect(col.sortValue({ className: "Street" })).toBe(1);
+  });
+});

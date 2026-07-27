@@ -1638,6 +1638,39 @@ button, input, select, textarea { font: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Car class tag on multi-class seasons (S14 GT3/Street, S18a/b Hypercar/GT3).
+   Neutral by default so an unseen class name still renders sensibly; the
+   per-class colours below are an enhancement, not a requirement. */
+.class-tag {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  background: var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.class-tag--hypercar { background: rgba(253, 126, 20, 0.12); color: #b4560a; }
+.class-tag--gt3 { background: rgba(13, 110, 253, 0.1); color: #0a58ca; }
+.class-tag--street { background: rgba(25, 135, 84, 0.12); color: #146c43; }
+
+/* Shown when a head-to-head spans two classes, where lap-time metrics compare
+   the cars more than the drivers. */
+.race-class-warning {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: rgba(253, 126, 20, 0.07);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 .h2h-legend {
   display: flex;
   flex-wrap: wrap;

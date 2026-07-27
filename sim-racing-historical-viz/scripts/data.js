@@ -72,6 +72,11 @@ function parseDataset(name, rawMarkdown, source) {
       wccMembers: parseTeamMembers(wccTeam),
       isUpcoming,
       isMultiClass: wdcWinners.length > 1 || /multi-class/i.test(row.Car || ""),
+      // A season can run two classes under one championship (S18a/b) or award a
+      // title per class (S14, S24a). Only the second interleaves two rankings in
+      // one standings table, so the two cases must render differently. More than
+      // one WDC in the registry is exactly that signal.
+      isSplitChampionship: wdcWinners.length > 1,
     };
   });
 
@@ -152,6 +157,7 @@ function parseDataset(name, rawMarkdown, source) {
       ...registryEntry,
       ...meta,
       isUpcoming: Boolean(registryEntry.isUpcoming),
+      isSplitChampionship: Boolean(registryEntry.isSplitChampionship || meta.wdcWinners?.length > 1),
       venueNames: meta.venues,
       scoringSystem: extractParagraphAfterHeading(block.lines, /^###\s+Scoring System\s*$/i),
       standings: parsedStandings,
@@ -1578,6 +1584,8 @@ function buildTrackAggregates(dataset) {
             fastestLaps: 0,
             totalPoints: 0,
             sumFinish: 0,
+            finishSamples: 0,
+            penaltyPlacements: 0,
             seasonIds: [],
           };
         }
@@ -1593,7 +1601,15 @@ function buildTrackAggregates(dataset) {
           if (pos <= 3) entry.podiums += 1;
           if (pos <= 5) entry.top5s += 1;
           entry.totalPoints += race.points || 0;
-          entry.sumFinish += pos;
+          // A penalty placement is a real, deliberate result but not a
+          // finishing position, so it counts as a start and keeps its points
+          // while staying out of the average. See PENALTY_POSITION_MIN.
+          if (isPenaltyPlacement(pos)) {
+            entry.penaltyPlacements += 1;
+          } else {
+            entry.sumFinish += pos;
+            entry.finishSamples += 1;
+          }
           // Pole / fastest-lap are encoded as markers in the position cell,
           // e.g. "1 (P,FL)", "3 (FL)", "6 (P)".
           const markers = extractResultMarkers(race.position);
@@ -1611,7 +1627,7 @@ function buildTrackAggregates(dataset) {
     entry.rawWinRate = (entry.wins / entry.starts) * 100;
     entry.rawPodiumRate = (entry.podiums / entry.starts) * 100;
     entry.rawTop5Rate = (entry.top5s / entry.starts) * 100;
-    entry.avgFinish = entry.starts > 0 ? entry.sumFinish / entry.starts : null;
+    entry.avgFinish = entry.finishSamples > 0 ? entry.sumFinish / entry.finishSamples : null;
     entry.poleRate = (entry.poles / entry.starts) * 100;
     entry.fastestLapRate = (entry.fastestLaps / entry.starts) * 100;
     entry.pointsPerStart = entry.starts > 0 ? entry.totalPoints / entry.starts : 0;
@@ -1622,6 +1638,22 @@ function buildTrackAggregates(dataset) {
 
 // Parse pole (P) and fastest-lap (FL) markers out of a position cell such as
 // "1 (P,FL)" or "6 (P)". Returns booleans; unmarked cells yield all-false.
+// The stewards sometimes record a result at a position far outside the field
+// rather than reclassifying it to last — S21 Monza R4 has James at P99, a
+// self-inflicted DNF they let stand as the penalty. That is a deliberate,
+// meaningful result, so it counts as a start and keeps its points, but it is a
+// penalty placement rather than a finishing position and must never be averaged
+// as one. Untreated it read James's Monza average as 26.25 in a series whose
+// largest field has ever been 19.
+//
+// The threshold sits well clear of any real field so a genuine large-grid
+// finish can never be mistaken for one.
+const PENALTY_POSITION_MIN = 50;
+
+function isPenaltyPlacement(position) {
+  return typeof position === "number" && position >= PENALTY_POSITION_MIN;
+}
+
 function extractResultMarkers(position) {
   const paren = String(position == null ? "" : position).match(/\(([^)]*)\)/);
   if (!paren) return { pole: false, fastestLap: false };
@@ -2127,5 +2159,6 @@ if (typeof module !== "undefined" && module.exports) {
     getFilteredSeasonRecords, buildCareerAggregates, buildSeasonRanking,
     buildTeamAggregates, buildWccHistoryRows,
     isPlaceholderValue, normalizeCarSpec, makeSeasonDriverKey,
+    isPenaltyPlacement, PENALTY_POSITION_MIN,
   };
 }
